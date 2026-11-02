@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Layers, MoreHorizontal, Plus, Repeat, Sparkles } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Layers, MoreHorizontal, Plus, Repeat, Sparkles, Code2 } from 'lucide-react'
 import MainLayout from '@/components/layout/MainLayout'
 import SearchInput from '@/components/ui/search-input'
 import { Button } from '@/components/ui/button'
@@ -172,7 +172,10 @@ export default function GroupClassesPage() {
             </p>
           </div>
           <div className="flex shrink-0 gap-2">
-            {/* Website embed hidden for now: re-add a button that calls setEmbedOpen(true) to bring it back. */}
+            <Button variant="outline" className="h-9 gap-2 rounded-lg px-4" onClick={() => setEmbedOpen(true)}>
+              <Code2 className="h-4 w-4" />
+              Website embed
+            </Button>
             <Button className="h-9 gap-2 rounded-lg bg-brand px-4 text-brand-foreground hover:bg-brand-dark" onClick={() => openDrawer()}>
               <Plus className="h-4 w-4" />
               New class

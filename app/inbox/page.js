@@ -961,6 +961,13 @@ function InboxPageContent() {
     }
   }
 
+  // The id check drops a late save response once staff have moved to another thread.
+  const handleContactPatched = (contactId, patch) => {
+    setSelectedLeadData((prev) =>
+      prev && String(prev._id) === String(contactId) ? { ...prev, ...patch } : prev,
+    )
+  }
+
   const handleToggleAiReplies = async (next) => {
     const contactId = selectedLeadData?._id
     if (!contactId || aiToggleSaving) return
@@ -2263,6 +2270,8 @@ function InboxPageContent() {
               aiRepliesOn={leadAiRepliesOn(selectedLeadData)}
               aiToggleSaving={aiToggleSaving}
               onToggleAiReplies={selectedLeadData?._id ? handleToggleAiReplies : null}
+              contactKind={selectedContactKind}
+              onContactPatched={handleContactPatched}
             />
           </div>
         )}
@@ -2278,6 +2287,8 @@ function InboxPageContent() {
                 aiRepliesOn={leadAiRepliesOn(selectedLeadData)}
                 aiToggleSaving={aiToggleSaving}
                 onToggleAiReplies={selectedLeadData?._id ? handleToggleAiReplies : null}
+                contactKind={selectedContactKind}
+                onContactPatched={handleContactPatched}
               />
             )}
           </SheetContent>

@@ -9,6 +9,7 @@ import { useToast } from '@/components/ui/toast'
 import { Button } from '@/components/ui/button'
 import Sidebar from './Sidebar'
 import Header from './Header'
+import GlobalIncomingCallAlert from '@/components/human-queue/GlobalIncomingCallAlert'
 import { cn } from '@/lib/utils'
 
 export default function MainLayout({
@@ -142,6 +143,9 @@ export default function MainLayout({
           {children}
         </main>
       </div>
+      <Suspense fallback={null}>
+        <GlobalIncomingCallAlert />
+      </Suspense>
     </div>
   )
 }

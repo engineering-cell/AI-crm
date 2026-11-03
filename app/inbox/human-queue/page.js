@@ -17,7 +17,6 @@ import {
   Settings,
   UserCheck,
   Users,
-  Volume2,
 } from 'lucide-react'
 import MainLayout from '@/components/layout/MainLayout'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -28,8 +27,6 @@ import { getStudioTimezone } from '@/lib/studioTimezone'
 import GlobalLoader from '@/components/shared/GlobalLoader'
 import api from '@/lib/api'
 import { isPersistedCallId, nextOutboundPanelStatus } from '@/lib/outboundCallStatus'
-import { isNotificationEnabled } from '@/lib/notificationPreferences'
-import { playIncomingRing } from '@/lib/notificationSounds'
 import { useToast } from '@/components/ui/toast'
 import { getCurrentUser } from '@/lib/auth'
 import { canManageCallCenter, hasPermission } from '@/lib/permissions'
@@ -317,8 +314,9 @@ function SettingsPanel({ onClose, canEdit }) {
           <div className="rounded-xl border border-border bg-muted/40 px-4 py-3">
             <p className="text-xs text-muted-foreground leading-relaxed">
               <span className="font-semibold text-foreground">Escalation rules:</span>{' '}
-              The AI only transfers or schedules a callback when the caller <span className="font-medium">explicitly asks</span> for it.
-              Frustration or complaints alone will not trigger an escalation.
+              The AI transfers immediately when the caller <span className="font-medium">asks for a person</span>.
+              If it cannot answer something, it offers a team member and transfers only after they say yes.
+              Frustration alone or a casual &quot;call me later&quot; does not escalate.
             </p>
           </div>
 
@@ -383,7 +381,6 @@ function HumanQueuePageContent() {
   const [callbackOutboundCall, setCallbackOutboundCall] = useState(null)
   const [callbackOutboundConnection, setCallbackOutboundConnection] = useState(null)
   const [callbackOutboundStatus, setCallbackOutboundStatus] = useState('connecting')
-  const [soundEnabled, setSoundEnabled] = useState(true)
 
   const canViewSettings = hasPermission('inbox', 'QueueSettings', 'read')
   const canEditSettings = hasPermission('inbox', 'QueueSettings', 'write')
@@ -407,8 +404,8 @@ function HumanQueuePageContent() {
   const toastRef = useRef(toast)
   useEffect(() => { toastRef.current = toast }, [toast])
 
-  const prevWaitingCountRef = useRef(0)
   const callerDisconnectToastRef = useRef(false)
+  const answerParamHandledRef = useRef(null)
   const endingCallbackOutboundRef = useRef(false)
   const endCallbackOutboundRef = useRef(null)
   const callbackOutboundConnectionRef = useRef(null)
@@ -680,17 +677,10 @@ function HumanQueuePageContent() {
     }
   }, [fetchQueueData, fetchCallbacks, activeTab])
 
-  // Ring on new waiting calls
   const waitingCalls = useMemo(
     () => (activeTab === 'waiting' ? escalations.filter((i) => i.status === 'waiting') : []),
     [escalations, activeTab],
   )
-  useEffect(() => {
-    if (activeTab === 'callbacks' || activeTab === 'resolved' || !soundEnabled) return
-    const count = tabCounts.waiting ?? waitingCalls.length
-    if (count > prevWaitingCountRef.current && isNotificationEnabled('humanQueue.sound')) playIncomingRing()
-    prevWaitingCountRef.current = count
-  }, [tabCounts.waiting, waitingCalls.length, soundEnabled, activeTab])
 
   // ── Agent availability toggle ──
   const handleToggleAgentAvailability = async (agentId, newValue) => {
@@ -1155,6 +1145,59 @@ function HumanQueuePageContent() {
   )
   const canAnswerCalls = isCallCenterAgent && canManageCalls && isOnlineForCalls
 
+  const handleAnswerRef = useRef(handleAnswer)
+  handleAnswerRef.current = handleAnswer
+  const escalationsRef = useRef(escalations)
+  escalationsRef.current = escalations
+
+  // Global popup navigates here with ?answer=<queueItemId> — claim via existing handleAnswer.
+  // The id is marked handled immediately so a queue refresh cannot claim twice.
+  useEffect(() => {
+    const answerId = searchParams?.get('answer')
+    if (!answerId || answeringId || activeConnection || callbackOutboundCall) return
+    if (answerParamHandledRef.current === answerId) return
+    if (!canAnswerCalls) return
+    if (loading) return
+
+    answerParamHandledRef.current = answerId
+
+    const stripAnswerParam = () => {
+      const params = new URLSearchParams(searchParams?.toString() || '')
+      params.delete('answer')
+      const qs = params.toString()
+      router.replace(qs ? `/inbox/human-queue?${qs}` : '/inbox/human-queue')
+    }
+
+    const fromList = escalationsRef.current.find((i) => String(i.id || i._id) === String(answerId))
+
+    ;(async () => {
+      let item = fromList
+      if (!item?.conferenceName) {
+        const r = await api.get(`/api/human-queue/${encodeURIComponent(answerId)}`)
+        if (!r.success || !r.data?.conferenceName) {
+          stripAnswerParam()
+          toast.error({
+            title: 'Call unavailable',
+            message: r.error || 'That waiting call is no longer available.',
+          })
+          return
+        }
+        item = r.data
+      }
+      stripAnswerParam()
+      await handleAnswerRef.current(item)
+    })()
+  }, [
+    searchParams,
+    canAnswerCalls,
+    answeringId,
+    activeConnection,
+    callbackOutboundCall,
+    loading,
+    router,
+    toast,
+  ])
+
   return (
     <MainLayout title="Call Center" subtitle="Live voice escalations from AI agents">
       <div className="space-y-4">
@@ -1232,22 +1275,6 @@ function HumanQueuePageContent() {
 
             {/* Right controls */}
             <div className="flex flex-wrap items-center gap-2">
-              {/* Sound toggle */}
-              {activeTab !== 'callbacks' && (
-                <button
-                  type="button"
-                  onClick={() => setSoundEnabled((v) => !v)}
-                  className={cn(
-                    'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium',
-                    soundEnabled
-                      ? 'border-[var(--studio-primary)]/30 bg-[var(--studio-primary-light)]/30 text-[var(--studio-primary)]'
-                      : 'border-border text-muted-foreground',
-                  )}
-                >
-                  <Volume2 className="h-3.5 w-3.5" />
-                  {soundEnabled ? 'Ring on' : 'Ring off'}
-                </button>
-              )}
               {/* Settings — only shown with QueueSettings read */}
               {canViewSettings && (
                 <button

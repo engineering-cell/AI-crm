@@ -2,14 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { PhoneCall, PhoneIncoming, X } from 'lucide-react'
+import { PhoneCall, X } from 'lucide-react'
 import api from '@/lib/api'
 import { getCurrentUser } from '@/lib/auth'
 import { hasPermission } from '@/lib/permissions'
 import { isNotificationEnabled } from '@/lib/notificationPreferences'
 import { startIncomingRingLoop, stopIncomingRingLoop } from '@/lib/notificationSounds'
 import { getActiveConnection } from '@/lib/twilioVoiceClient'
-import { cn } from '@/lib/utils'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { cn, getInitials } from '@/lib/utils'
 
 const AGENTS_POLL_MS = 30_000
 const WAITING_VISIBLE_MS = 5_000
@@ -17,6 +18,10 @@ const WAITING_HIDDEN_MS = 8_000
 
 function waitingItemId(item) {
   return String(item?.id || item?._id || '')
+}
+
+function sameEmail(a, b) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
 }
 
 /**
@@ -29,6 +34,7 @@ export default function GlobalIncomingCallAlert() {
   const searchParams = useSearchParams()
   const [enabled, setEnabled] = useState(false)
   const [online, setOnline] = useState(false)
+  const [canAnswer, setCanAnswer] = useState(false)
   const [waiting, setWaiting] = useState([])
   const [dismissedIds, setDismissedIds] = useState(() => new Set())
   const [answering, setAnswering] = useState(false)
@@ -50,6 +56,7 @@ export default function GlobalIncomingCallAlert() {
     if (!user?.email) {
       setEnabled(false)
       setOnline(false)
+      setCanAnswer(false)
       return
     }
     const r = await api.get('/api/human-queue/agents')
@@ -57,17 +64,20 @@ export default function GlobalIncomingCallAlert() {
       stopPollingRef.current = true
       setEnabled(false)
       setOnline(false)
+      setCanAnswer(false)
       return
     }
     if (!r.success) return
     const agents = Array.isArray(r.data?.agents) ? r.data.agents : (Array.isArray(r.data) ? r.data : [])
-    const me = agents.find((a) => a.email === user.email)
+    const me = agents.find((a) => sameEmail(a.email, user.email))
+    const manage = Array.isArray(r.data) ? false : Boolean(r.data?.canManageCalls)
     setEnabled(Boolean(me))
     setOnline(Boolean(me?.isAvailableForCalls))
+    setCanAnswer(manage)
   }, [canReadCallCenter])
 
   const refreshWaiting = useCallback(async () => {
-    if (stopPollingRef.current || !online) {
+    if (stopPollingRef.current || !online || !canAnswer) {
       setWaiting([])
       return
     }
@@ -76,13 +86,14 @@ export default function GlobalIncomingCallAlert() {
       stopPollingRef.current = true
       setEnabled(false)
       setOnline(false)
+      setCanAnswer(false)
       setWaiting([])
       return
     }
     if (!r.success) return
     const items = Array.isArray(r.data) ? r.data : (Array.isArray(r.data?.items) ? r.data.items : [])
     setWaiting(items.filter((i) => i.status === 'waiting' || !i.status))
-  }, [online])
+  }, [online, canAnswer])
 
   // Gate: only users with Call Center read
   useEffect(() => {
@@ -90,6 +101,7 @@ export default function GlobalIncomingCallAlert() {
       stopPollingRef.current = true
       setEnabled(false)
       setOnline(false)
+      setCanAnswer(false)
       setWaiting([])
       return
     }
@@ -106,7 +118,7 @@ export default function GlobalIncomingCallAlert() {
 
   // Waiting poll — only while online
   useEffect(() => {
-    if (!online || stopPollingRef.current) {
+    if (!online || !canAnswer || stopPollingRef.current) {
       setWaiting([])
       return undefined
     }
@@ -136,7 +148,7 @@ export default function GlobalIncomingCallAlert() {
       clearInterval(intervalId)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [online, refreshWaiting])
+  }, [online, canAnswer, refreshWaiting])
 
   // Keep Answer/ring in sync when Twilio connection starts on another page surface
   useEffect(() => {
@@ -152,13 +164,14 @@ export default function GlobalIncomingCallAlert() {
   })
   const nextCall = visibleWaiting[0] || null
   const nextId = nextCall ? waitingItemId(nextCall) : ''
-  const showPopup = Boolean(nextCall && enabled && online && !onCallCenterWaiting)
+  const showPopup = Boolean(nextCall && enabled && online && canAnswer && !onCallCenterWaiting)
 
   // Ring loop while any waiting call exists for an online agent (including Call Center waiting tab)
   useEffect(() => {
     const shouldRing =
       enabled
       && online
+      && canAnswer
       && visibleWaiting.length > 0
       && !alreadyOnCall
       && !answering
@@ -180,11 +193,11 @@ export default function GlobalIncomingCallAlert() {
         wasRingingRef.current = false
       }
     }
-  }, [enabled, online, visibleWaiting.length, alreadyOnCall, answering, nextId])
+  }, [enabled, online, canAnswer, visibleWaiting.length, alreadyOnCall, answering, nextId])
 
   // System notification when CRM tab is in the background (permission already granted only)
   useEffect(() => {
-    if (!enabled || !online || typeof window === 'undefined' || typeof Notification === 'undefined') return
+    if (!enabled || !online || !canAnswer || typeof window === 'undefined' || typeof Notification === 'undefined') return
     if (Notification.permission !== 'granted') return
     if (document.visibilityState !== 'hidden') return
 
@@ -203,7 +216,7 @@ export default function GlobalIncomingCallAlert() {
         // Notifications unavailable
       }
     }
-  }, [enabled, online, visibleWaiting])
+  }, [enabled, online, canAnswer, visibleWaiting])
 
   // Clear dismissals when the call leaves the waiting list
   useEffect(() => {
@@ -240,66 +253,89 @@ export default function GlobalIncomingCallAlert() {
   if (!showPopup || !nextCall) return null
 
   const highPriority = nextCall.priority === 'High'
+  const callerName = nextCall.leadName || nextCall.callerName || 'Unknown caller'
+  const callerPhone = nextCall.phone || nextCall.callerPhone || ''
+  const reason = nextCall.intent || nextCall.escalationReason || 'Requested human assistance'
+  const waitingLabel = nextCall.waitMinutes
+    ? `Waiting ${nextCall.waitMinutes}m`
+    : 'Just now'
+  const queueLabel = visibleWaiting.length > 1
+    ? `${visibleWaiting.length} waiting`
+    : '1 in queue'
 
   return (
     <div
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-[400] flex justify-center p-4 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:justify-end"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-[400] flex justify-center p-4 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:justify-end sm:p-0"
       role="alert"
       aria-live="assertive"
     >
-      <div
-        className={cn(
-          'pointer-events-auto relative w-full max-w-sm overflow-hidden rounded-2xl border shadow-lg',
-          highPriority
-            ? 'border-red-300/70 bg-card'
-            : 'border-[var(--studio-primary)]/40 bg-card',
-        )}
-      >
-        <div className={cn(
-          'absolute inset-y-0 left-0 w-1',
-          highPriority ? 'bg-red-500 animate-pulse' : 'bg-[var(--studio-primary)] animate-pulse',
-        )} />
-        <div className="relative flex flex-col gap-3 p-4 pl-5">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex items-center gap-3 min-w-0">
-              <div
-                className={cn(
-                  'flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white',
-                  highPriority ? 'bg-red-500 animate-pulse' : 'bg-[var(--studio-primary)]',
-                )}
-              >
-                <PhoneIncoming className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-foreground">
-                  Incoming call{visibleWaiting.length > 1 ? ` · ${visibleWaiting.length} waiting` : ''}
-                </p>
-                <p className="text-sm text-foreground truncate">
-                  {nextCall.leadName || nextCall.callerName || 'Unknown caller'}
-                </p>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">
-                  {nextCall.intent || nextCall.escalationReason || 'Requested human assistance'}
-                  {nextCall.waitMinutes ? ` · waiting ${nextCall.waitMinutes}m` : ''}
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={handleDismiss}
-              className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              aria-label="Dismiss"
-            >
-              <X className="h-4 w-4" />
-            </button>
+      <div className="pointer-events-auto w-full max-w-[380px] overflow-hidden rounded-2xl border border-border bg-card shadow-2xl animate-scale-in">
+        <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-2.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="relative flex h-2 w-2 shrink-0">
+              <span className={cn(
+                'absolute inline-flex h-full w-full animate-ping rounded-full opacity-70',
+                highPriority ? 'bg-red-500' : 'bg-[var(--studio-primary)]',
+              )} />
+              <span className={cn(
+                'relative inline-flex h-2 w-2 rounded-full',
+                highPriority ? 'bg-red-500' : 'bg-[var(--studio-primary)]',
+              )} />
+            </span>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Incoming call
+            </p>
+            {highPriority && (
+              <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">
+                High
+              </span>
+            )}
           </div>
+          <button
+            type="button"
+            onClick={handleDismiss}
+            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Dismiss"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4 p-4">
+          <div className="flex items-center gap-3">
+            <Avatar className="h-12 w-12 border border-border">
+              <AvatarFallback className="bg-[var(--studio-primary)] text-sm font-semibold text-white">
+                {getInitials(callerName)}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0">
+              <p className="truncate text-base font-semibold text-foreground">{callerName}</p>
+              {callerPhone ? (
+                <p className="truncate text-sm text-muted-foreground">{callerPhone}</p>
+              ) : null}
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {waitingLabel}
+                <span className="px-1.5 text-border">·</span>
+                {queueLabel}
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border bg-muted/30 px-3 py-2.5">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Why they called
+            </p>
+            <p className="mt-1 line-clamp-2 text-sm leading-snug text-foreground">{reason}</p>
+          </div>
+
           <button
             type="button"
             disabled={alreadyOnCall || answering}
             onClick={handleAnswer}
-            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[var(--studio-primary)] text-sm font-semibold text-white hover:brightness-95 disabled:opacity-60"
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[var(--studio-primary)] text-sm font-semibold text-white shadow-sm transition-all hover:brightness-95 disabled:opacity-60"
           >
             <PhoneCall className="h-4 w-4" />
-            {answering ? 'Connecting…' : alreadyOnCall ? 'Already on a call' : 'Answer'}
+            {answering ? 'Connecting…' : alreadyOnCall ? 'Already on a call' : 'Answer call'}
           </button>
         </div>
       </div>

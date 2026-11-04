@@ -987,22 +987,22 @@ function HumanQueuePageContent() {
   // ── Queue actions ──
   const handleAnswer = async (item) => {
     const itemId = item.id || item._id
-    if (!itemId || !item.conferenceName) return
+    if (!itemId || !item.conferenceName) return false
     if (!isCallCenterAgent) {
       toast.error({ title: 'No access', message: 'Your role must be marked as Call Center Agent to answer calls.' })
-      return
+      return false
     }
     if (!canManageCalls) {
       toast.error({ title: 'No access', message: 'Call Center write or edit permission is required to answer calls.' })
-      return
+      return false
     }
     if (!isOnlineForCalls) {
       toast.error({ title: 'You are offline', message: 'Toggle yourself online in Team Availability before answering calls.' })
-      return
+      return false
     }
     if (activeConnection || callbackOutboundCall) {
       toast.error({ title: 'Already on a call', message: 'Finish your current call first.' })
-      return
+      return false
     }
 
     setAnsweringId(itemId)
@@ -1016,7 +1016,7 @@ function HumanQueuePageContent() {
         toast.error({ title: 'Unable to answer', message: claimResult.error || 'Could not claim this call.' })
         setActiveCall(null)
         setCallStatus('idle')
-        return
+        return false
       }
 
       const claimedItem = claimResult.data || item
@@ -1053,6 +1053,7 @@ function HumanQueuePageContent() {
 
       toast.success({ title: 'Connected', message: 'You are now connected to the caller.' })
       fetchQueueData({ silent: true })
+      return true
     } catch (error) {
       console.error(error)
       await api.post(`/api/human-queue/${itemId}/release-claim`, {}).catch(() => {})
@@ -1063,6 +1064,7 @@ function HumanQueuePageContent() {
         message: error.message || 'Could not join the call. Check Twilio Voice SDK configuration.',
       })
       fetchQueueData({ silent: true })
+      return false
     } finally {
       setAnsweringId(null)
     }
@@ -1135,13 +1137,15 @@ function HumanQueuePageContent() {
   const availableAgents = agents.filter((a) => a.availability === 'available').length
   const isOnCall = Boolean(activeConnection)
   // Role toggle "Call Center Agent" → user appears in the agents list from the API
+  const emailsMatch = (agentEmail) =>
+    String(agentEmail || '').trim().toLowerCase() === String(currentUser?.email || '').trim().toLowerCase()
   const isCallCenterAgent = Boolean(
-    currentUser?.email && agents.some((a) => a.email === currentUser.email),
+    currentUser?.email && agents.some((a) => emailsMatch(a.email)),
   )
   // Must be a Call Center Agent AND toggled online to answer live calls
   const isOnlineForCalls = Boolean(
     currentUser?.email &&
-      agents.some((a) => a.email === currentUser.email && a.isAvailableForCalls),
+      agents.some((a) => emailsMatch(a.email) && a.isAvailableForCalls),
   )
   const canAnswerCalls = isCallCenterAgent && canManageCalls && isOnlineForCalls
 
@@ -1149,6 +1153,11 @@ function HumanQueuePageContent() {
   handleAnswerRef.current = handleAnswer
   const escalationsRef = useRef(escalations)
   escalationsRef.current = escalations
+
+  // Once the answer param is gone, allow the same call to be answered again if the first try failed.
+  useEffect(() => {
+    if (!searchParams?.get('answer')) answerParamHandledRef.current = null
+  }, [searchParams])
 
   // Global popup navigates here with ?answer=<queueItemId> — claim via existing handleAnswer.
   // The id is marked handled immediately so a queue refresh cannot claim twice.
@@ -1174,6 +1183,7 @@ function HumanQueuePageContent() {
       let item = fromList
       if (!item?.conferenceName) {
         const r = await api.get(`/api/human-queue/${encodeURIComponent(answerId)}`)
+        if (answerParamHandledRef.current !== answerId) return
         if (!r.success || !r.data?.conferenceName) {
           stripAnswerParam()
           toast.error({
@@ -1184,8 +1194,9 @@ function HumanQueuePageContent() {
         }
         item = r.data
       }
-      stripAnswerParam()
+      if (answerParamHandledRef.current !== answerId) return
       await handleAnswerRef.current(item)
+      stripAnswerParam()
     })()
   }, [
     searchParams,

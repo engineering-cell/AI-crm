@@ -17,7 +17,6 @@ import {
   Settings,
   UserCheck,
   Users,
-  Volume2,
 } from 'lucide-react'
 import MainLayout from '@/components/layout/MainLayout'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -28,8 +27,6 @@ import { getStudioTimezone } from '@/lib/studioTimezone'
 import GlobalLoader from '@/components/shared/GlobalLoader'
 import api from '@/lib/api'
 import { isPersistedCallId, nextOutboundPanelStatus } from '@/lib/outboundCallStatus'
-import { isNotificationEnabled } from '@/lib/notificationPreferences'
-import { playIncomingRing } from '@/lib/notificationSounds'
 import { useToast } from '@/components/ui/toast'
 import { getCurrentUser } from '@/lib/auth'
 import { canManageCallCenter, hasPermission } from '@/lib/permissions'
@@ -317,8 +314,9 @@ function SettingsPanel({ onClose, canEdit }) {
           <div className="rounded-xl border border-border bg-muted/40 px-4 py-3">
             <p className="text-xs text-muted-foreground leading-relaxed">
               <span className="font-semibold text-foreground">Escalation rules:</span>{' '}
-              The AI only transfers or schedules a callback when the caller <span className="font-medium">explicitly asks</span> for it.
-              Frustration or complaints alone will not trigger an escalation.
+              The AI transfers immediately when the caller <span className="font-medium">asks for a person</span>.
+              If it cannot answer something, it offers a team member and transfers only after they say yes.
+              Frustration alone or a casual &quot;call me later&quot; does not escalate.
             </p>
           </div>
 
@@ -383,7 +381,6 @@ function HumanQueuePageContent() {
   const [callbackOutboundCall, setCallbackOutboundCall] = useState(null)
   const [callbackOutboundConnection, setCallbackOutboundConnection] = useState(null)
   const [callbackOutboundStatus, setCallbackOutboundStatus] = useState('connecting')
-  const [soundEnabled, setSoundEnabled] = useState(true)
 
   const canViewSettings = hasPermission('inbox', 'QueueSettings', 'read')
   const canEditSettings = hasPermission('inbox', 'QueueSettings', 'write')
@@ -407,8 +404,8 @@ function HumanQueuePageContent() {
   const toastRef = useRef(toast)
   useEffect(() => { toastRef.current = toast }, [toast])
 
-  const prevWaitingCountRef = useRef(0)
   const callerDisconnectToastRef = useRef(false)
+  const answerParamHandledRef = useRef(null)
   const endingCallbackOutboundRef = useRef(false)
   const endCallbackOutboundRef = useRef(null)
   const callbackOutboundConnectionRef = useRef(null)
@@ -680,17 +677,10 @@ function HumanQueuePageContent() {
     }
   }, [fetchQueueData, fetchCallbacks, activeTab])
 
-  // Ring on new waiting calls
   const waitingCalls = useMemo(
     () => (activeTab === 'waiting' ? escalations.filter((i) => i.status === 'waiting') : []),
     [escalations, activeTab],
   )
-  useEffect(() => {
-    if (activeTab === 'callbacks' || activeTab === 'resolved' || !soundEnabled) return
-    const count = tabCounts.waiting ?? waitingCalls.length
-    if (count > prevWaitingCountRef.current && isNotificationEnabled('humanQueue.sound')) playIncomingRing()
-    prevWaitingCountRef.current = count
-  }, [tabCounts.waiting, waitingCalls.length, soundEnabled, activeTab])
 
   // ── Agent availability toggle ──
   const handleToggleAgentAvailability = async (agentId, newValue) => {
@@ -997,22 +987,22 @@ function HumanQueuePageContent() {
   // ── Queue actions ──
   const handleAnswer = async (item) => {
     const itemId = item.id || item._id
-    if (!itemId || !item.conferenceName) return
+    if (!itemId || !item.conferenceName) return false
     if (!isCallCenterAgent) {
       toast.error({ title: 'No access', message: 'Your role must be marked as Call Center Agent to answer calls.' })
-      return
+      return false
     }
     if (!canManageCalls) {
       toast.error({ title: 'No access', message: 'Call Center write or edit permission is required to answer calls.' })
-      return
+      return false
     }
     if (!isOnlineForCalls) {
       toast.error({ title: 'You are offline', message: 'Toggle yourself online in Team Availability before answering calls.' })
-      return
+      return false
     }
     if (activeConnection || callbackOutboundCall) {
       toast.error({ title: 'Already on a call', message: 'Finish your current call first.' })
-      return
+      return false
     }
 
     setAnsweringId(itemId)
@@ -1026,7 +1016,7 @@ function HumanQueuePageContent() {
         toast.error({ title: 'Unable to answer', message: claimResult.error || 'Could not claim this call.' })
         setActiveCall(null)
         setCallStatus('idle')
-        return
+        return false
       }
 
       const claimedItem = claimResult.data || item
@@ -1063,6 +1053,7 @@ function HumanQueuePageContent() {
 
       toast.success({ title: 'Connected', message: 'You are now connected to the caller.' })
       fetchQueueData({ silent: true })
+      return true
     } catch (error) {
       console.error(error)
       await api.post(`/api/human-queue/${itemId}/release-claim`, {}).catch(() => {})
@@ -1073,6 +1064,7 @@ function HumanQueuePageContent() {
         message: error.message || 'Could not join the call. Check Twilio Voice SDK configuration.',
       })
       fetchQueueData({ silent: true })
+      return false
     } finally {
       setAnsweringId(null)
     }
@@ -1145,15 +1137,77 @@ function HumanQueuePageContent() {
   const availableAgents = agents.filter((a) => a.availability === 'available').length
   const isOnCall = Boolean(activeConnection)
   // Role toggle "Call Center Agent" → user appears in the agents list from the API
+  const emailsMatch = (agentEmail) =>
+    String(agentEmail || '').trim().toLowerCase() === String(currentUser?.email || '').trim().toLowerCase()
   const isCallCenterAgent = Boolean(
-    currentUser?.email && agents.some((a) => a.email === currentUser.email),
+    currentUser?.email && agents.some((a) => emailsMatch(a.email)),
   )
   // Must be a Call Center Agent AND toggled online to answer live calls
   const isOnlineForCalls = Boolean(
     currentUser?.email &&
-      agents.some((a) => a.email === currentUser.email && a.isAvailableForCalls),
+      agents.some((a) => emailsMatch(a.email) && a.isAvailableForCalls),
   )
   const canAnswerCalls = isCallCenterAgent && canManageCalls && isOnlineForCalls
+
+  const handleAnswerRef = useRef(handleAnswer)
+  handleAnswerRef.current = handleAnswer
+  const escalationsRef = useRef(escalations)
+  escalationsRef.current = escalations
+
+  // Once the answer param is gone, allow the same call to be answered again if the first try failed.
+  useEffect(() => {
+    if (!searchParams?.get('answer')) answerParamHandledRef.current = null
+  }, [searchParams])
+
+  // Global popup navigates here with ?answer=<queueItemId> — claim via existing handleAnswer.
+  // The id is marked handled immediately so a queue refresh cannot claim twice.
+  useEffect(() => {
+    const answerId = searchParams?.get('answer')
+    if (!answerId || answeringId || activeConnection || callbackOutboundCall) return
+    if (answerParamHandledRef.current === answerId) return
+    if (!canAnswerCalls) return
+    if (loading) return
+
+    answerParamHandledRef.current = answerId
+
+    const stripAnswerParam = () => {
+      const params = new URLSearchParams(searchParams?.toString() || '')
+      params.delete('answer')
+      const qs = params.toString()
+      router.replace(qs ? `/inbox/human-queue?${qs}` : '/inbox/human-queue')
+    }
+
+    const fromList = escalationsRef.current.find((i) => String(i.id || i._id) === String(answerId))
+
+    ;(async () => {
+      let item = fromList
+      if (!item?.conferenceName) {
+        const r = await api.get(`/api/human-queue/${encodeURIComponent(answerId)}`)
+        if (answerParamHandledRef.current !== answerId) return
+        if (!r.success || !r.data?.conferenceName) {
+          stripAnswerParam()
+          toast.error({
+            title: 'Call unavailable',
+            message: r.error || 'That waiting call is no longer available.',
+          })
+          return
+        }
+        item = r.data
+      }
+      if (answerParamHandledRef.current !== answerId) return
+      await handleAnswerRef.current(item)
+      stripAnswerParam()
+    })()
+  }, [
+    searchParams,
+    canAnswerCalls,
+    answeringId,
+    activeConnection,
+    callbackOutboundCall,
+    loading,
+    router,
+    toast,
+  ])
 
   return (
     <MainLayout title="Call Center" subtitle="Live voice escalations from AI agents">
@@ -1232,22 +1286,6 @@ function HumanQueuePageContent() {
 
             {/* Right controls */}
             <div className="flex flex-wrap items-center gap-2">
-              {/* Sound toggle */}
-              {activeTab !== 'callbacks' && (
-                <button
-                  type="button"
-                  onClick={() => setSoundEnabled((v) => !v)}
-                  className={cn(
-                    'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium',
-                    soundEnabled
-                      ? 'border-[var(--studio-primary)]/30 bg-[var(--studio-primary-light)]/30 text-[var(--studio-primary)]'
-                      : 'border-border text-muted-foreground',
-                  )}
-                >
-                  <Volume2 className="h-3.5 w-3.5" />
-                  {soundEnabled ? 'Ring on' : 'Ring off'}
-                </button>
-              )}
               {/* Settings — only shown with QueueSettings read */}
               {canViewSettings && (
                 <button

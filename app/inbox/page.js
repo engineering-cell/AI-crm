@@ -19,6 +19,7 @@ import {
   markReadState,
   markUnreadState,
   numberConversationId,
+  readStateFromServer,
 } from '@/lib/inbox-messaging'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useInboxHeader } from '@/contexts/InboxHeaderContext'
@@ -537,25 +538,77 @@ function InboxPageContent() {
   // Location is enforced by the API via x-location-id (branch switcher reloads the page).
   const filteredConversations = useMemo(() => conversations, [conversations])
 
-  // Per-user read state (see lib/inbox-messaging). Loaded after mount — localStorage is client-only.
-  const readStateKey = `inbox-read:${getCurrentUserId() || 'me'}`
+  // Studio-wide read state (see lib/inbox-messaging). The old per-browser copy
+  // is merged into it once, so nothing someone already read turns unread again.
+  const legacyReadStateKey = `inbox-read:${getCurrentUserId() || 'me'}`
+  const loadReadState = useCallback(async () => {
+    const res = await api.get('/api/inbox/read-state')
+    if (res?.success && res.data) setReadState(readStateFromServer(res.data))
+  }, [])
+
   useEffect(() => {
-    let stored = null
-    try {
-      stored = JSON.parse(localStorage.getItem(readStateKey) || 'null')
-    } catch {
-      stored = null
+    let cancelled = false
+    ;(async () => {
+      let local = null
+      try {
+        local = JSON.parse(localStorage.getItem(legacyReadStateKey) || 'null')
+      } catch {
+        local = null
+      }
+      const res = await api.get('/api/inbox/read-state')
+      if (cancelled) return
+      if (!res?.success || !res.data) {
+        setReadState(local?.baseline ? local : emptyReadState())
+        return
+      }
+      let data = res.data
+      if (local?.baseline || !data.baseline) {
+        const synced = await api.post('/api/inbox/read-state/sync', {
+          baseline: local?.baseline || new Date().toISOString(),
+          read: local?.read || {},
+        })
+        if (synced?.success && synced.data) {
+          data = synced.data
+          try {
+            localStorage.removeItem(legacyReadStateKey)
+          } catch {
+            // Storage blocked — the merge is idempotent, so a retry next load is harmless.
+          }
+        }
+      }
+      if (!cancelled) setReadState(readStateFromServer(data))
+    })()
+    return () => {
+      cancelled = true
     }
-    setReadState(stored?.baseline ? stored : emptyReadState())
-  }, [readStateKey])
+  }, [legacyReadStateKey])
+
+  // Pick up conversations other staff opened or marked unread.
   useEffect(() => {
-    if (!readState) return
-    try {
-      localStorage.setItem(readStateKey, JSON.stringify(readState))
-    } catch {
-      // Private mode / storage full — unread still works for this session.
+    const refresh = () => {
+      if (document.visibilityState === 'visible') loadReadState()
     }
-  }, [readState, readStateKey])
+    const interval = setInterval(refresh, 30000)
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [loadReadState])
+
+  const markConversationRead = useCallback((convId) => {
+    if (!convId) return
+    setReadState((prev) => (prev ? markReadState(prev, convId) : prev))
+    api.post('/api/inbox/read-state/read', { conversationKey: convId }).catch(() => {})
+  }, [])
+
+  const markConversationUnread = useCallback((convId) => {
+    if (!convId) return
+    setReadState((prev) => (prev ? markUnreadState(prev, convId) : prev))
+    api.post('/api/inbox/read-state/unread', { conversationKey: convId }).catch(() => {})
+  }, [])
 
   const isUnread = useCallback((conv) => isConversationUnread(conv, readState), [readState])
 
@@ -1112,7 +1165,7 @@ function InboxPageContent() {
     }
 
     // Replying means it's been read. Scheduled sends wait in the Scheduled tab, not the thread.
-    setReadState((prev) => (prev ? markReadState(prev, convId) : prev))
+    markConversationRead(convId)
     if (scheduleNow !== false) {
       setThreadMessages((prev) => ({
         ...prev,
@@ -1398,8 +1451,8 @@ function InboxPageContent() {
 
   const handleMarkUnread = () => {
     if (!selectedConversation) return
-    setReadState((prev) => (prev ? markUnreadState(prev, selectedConversation) : prev))
-    toast.success({ title: 'Marked unread', message: 'It stays in Unread until you open it again.' })
+    markConversationUnread(selectedConversation)
+    toast.success({ title: 'Marked unread', message: 'It stays in Unread for the studio until someone opens it again.' })
   }
 
   const handleRenameContact = async (name) => {
@@ -2063,7 +2116,7 @@ function InboxPageContent() {
     setSelectedConversation(conversationId)
     setOpenedFromUnread(statusTab === 'Unread' ? conversationId : null)
     setRightView('thread')
-    setReadState((prev) => (prev ? markReadState(prev, conversationId) : prev))
+    markConversationRead(conversationId)
     setConversations((prev) => prev.map((conv) => (conv.id === conversationId ? { ...conv, unread: 0 } : conv)))
     setShowContactList(false)
     if (!isLgUp) setShowDetails(false)

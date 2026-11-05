@@ -74,7 +74,8 @@ export function buildEmbed({ base, format, locationIds, tag, accent, bg = LIGHT.
 
   if (format === 'link') return page
   if (format === 'iframe') {
-    return `<iframe src="${page}" title="Book a class" style="width:100%;height:640px;border:0" loading="lazy"></iframe>`
+    // allow="payment": Apple Pay and Google Pay won't run inside an iframe without it.
+    return `<iframe src="${page}" title="Book a class" allow="payment" style="width:100%;height:640px;border:0" loading="lazy"></iframe>`
   }
   const attrs = [
     `data-location="${locationIds.join(',')}"`,

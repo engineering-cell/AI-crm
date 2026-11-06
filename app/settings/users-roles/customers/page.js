@@ -1106,7 +1106,7 @@ function CustomersPageInner() {
                 {showTotalSpend ? (
                   <TableHead className="text-[12px] font-semibold">Total spend</TableHead>
                 ) : null}
-                <TableHead className="text-[12px] font-semibold">Joined</TableHead>
+                <TableHead className="text-[12px] font-semibold">Next Lesson</TableHead>
                 <TableHead />
               </TableRow>
             </TableHeader>
@@ -1208,7 +1208,7 @@ function CustomersPageInner() {
                       </TableCell>
                     ) : null}
                     <TableCell className="text-[12px] text-muted-foreground">
-                      {formatDate(customer.createdAt)}
+                      {customer.nextLesson ? formatDate(customer.nextLesson) : '—'}
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>

@@ -152,6 +152,10 @@ function paymentTypeBadge(type) {
   );
 }
 
+// Session counts can be fractional (e.g. 16.8) and float subtraction leaves noise
+// like 5.800000000000001 — round to 2dp so the UI never shows it.
+const roundSessions = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
 function SessionBar({ used, total }) {
   const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0;
   return (
@@ -163,7 +167,7 @@ function SessionBar({ used, total }) {
         />
       </div>
       <span className="text-[11px] text-muted-foreground shrink-0">
-        {total - used} left / {total}
+        {roundSessions(total - used)} left / {roundSessions(total)}
       </span>
     </div>
   );
@@ -1504,6 +1508,7 @@ function PaymentTimeline({ customerID, enrollmentID, payments: preloadedPayments
   const [loading, setLoading] = useState(false);
   const [syncingId, setSyncingId] = useState(null);
   const [bouncingId, setBouncingId] = useState(null);
+  const [cancellingId, setCancellingId] = useState(null);
   const toast = useToast();
   // A caller that already has the customer's full payment list (e.g. the
   // Events & Products tab) passes it pre-filtered — skips the redundant
@@ -1545,6 +1550,26 @@ function PaymentTimeline({ customerID, enrollmentID, payments: preloadedPayments
     } else {
       toast.success("Stripe still shows this as processing — try again shortly.");
     }
+    load(true);
+  }
+
+  // Customer changed their mind, or the wrong amount went to the card reader: cancels the
+  // pending reader charge (clears the reader, cancels at Stripe, package back to unpaid).
+  // If the customer had in fact already paid, the backend records it instead.
+  async function cancelPending(p) {
+    if (!window.confirm(`Cancel the pending $${Number(p.amount).toFixed(2)} card-reader charge? The package goes back to unpaid so you can send the right amount.`)) {
+      return;
+    }
+    setCancellingId(p._id);
+    const res = await api.post(`/api/payment/${p._id}/cancel-pending`);
+    setCancellingId(null);
+    if (!res.success) {
+      toast.error(res.error || "Couldn't cancel this charge.");
+      return;
+    }
+    if (res.data?.status === "completed") toast.success("The customer had already paid — payment recorded.");
+    else if (res.data?.status === "cancelled") toast.success("Charge cancelled.");
+    else toast.success("Stripe still shows this charge in progress — try again shortly.");
     load(true);
   }
 
@@ -1729,6 +1754,16 @@ function PaymentTimeline({ customerID, enrollmentID, payments: preloadedPayments
                                 className="text-[10px] font-medium text-muted-foreground hover:text-foreground underline underline-offset-2 disabled:opacity-50"
                               >
                                 {syncingId === p._id ? "Checking…" : "Check status"}
+                              </button>
+                            )}
+                            {p.status === "pending" && p.method === "terminal" && (
+                              <button
+                                type="button"
+                                disabled={cancellingId === p._id}
+                                onClick={() => cancelPending(p)}
+                                className="text-[10px] font-medium text-rose-600 hover:text-rose-700 underline underline-offset-2 disabled:opacity-50"
+                              >
+                                {cancellingId === p._id ? "Cancelling…" : "Cancel charge"}
                               </button>
                             )}
                             {p.method === "cheque" && p.checkStatus === "bounced" && (
@@ -2769,9 +2804,8 @@ function PackagesTab({ customerID, locationID }) {
                           svc.sessionsCompleted ?? 0,
                           (svc.sessionsUsed ?? 0) - sessSched,
                         );
-                        const sessRemaining = Math.max(
-                          0,
-                          sessTotal - sessUsed - sessSched,
+                        const sessRemaining = roundSessions(
+                          Math.max(0, sessTotal - sessUsed - sessSched),
                         );
                         const pps = Number(svc.pricePerSession) || 0;
                         const effectivePps =
@@ -2839,7 +2873,7 @@ function PackagesTab({ customerID, locationID }) {
                                   <p
                                     className={`text-[14px] font-bold ${cls ?? "text-foreground"}`}
                                   >
-                                    {value}
+                                    {roundSessions(value)}
                                   </p>
                                 </div>
                               ))}
@@ -4434,9 +4468,8 @@ function EnrollmentsTab({
                             svc.sessionsCompleted ?? 0,
                             (svc.sessionsUsed ?? 0) - sessSched,
                           );
-                          const sessRemaining = Math.max(
-                            0,
-                            sessTotal - sessUsed - sessSched,
+                          const sessRemaining = roundSessions(
+                            Math.max(0, sessTotal - sessUsed - sessSched),
                           );
                           const pps = isFree
                             ? 0
@@ -4605,22 +4638,22 @@ function EnrollmentsTab({
                                           </div>
                                         </div>
                                         <span className="text-[13px] font-semibold text-foreground text-right">
-                                          {sessTotal}
+                                          {roundSessions(sessTotal)}
                                         </span>
                                         <span
                                           className={`text-[13px] font-semibold text-right ${sessUsed > 0 ? "text-info" : "text-muted-foreground"}`}
                                         >
-                                          {sessUsed}
+                                          {roundSessions(sessUsed)}
                                         </span>
                                         <span
                                           className={`text-[13px] font-semibold text-right ${sessSched > 0 ? "text-violet-600" : "text-muted-foreground"}`}
                                         >
-                                          {sessSched}
+                                          {roundSessions(sessSched)}
                                         </span>
                                         <span
                                           className={`text-[13px] font-semibold text-right ${sessRemaining > 0 ? "text-foreground" : "text-muted-foreground"}`}
                                         >
-                                          {sessRemaining}
+                                          {roundSessions(sessRemaining)}
                                         </span>
                                         {/* Credit Balance is a SESSION COUNT —
                                             how many sessions the customer has
@@ -4797,16 +4830,16 @@ function EnrollmentsTab({
                                     Total
                                   </span>
                                   <span className="text-[13px] font-bold text-foreground text-right">
-                                    {totalEnrolled}
+                                    {roundSessions(totalEnrolled)}
                                   </span>
                                   <span className="text-[13px] font-bold text-foreground text-right">
-                                    {totalUsed}
+                                    {roundSessions(totalUsed)}
                                   </span>
                                   <span className="text-[13px] font-bold text-foreground text-right">
-                                    {totalSched}
+                                    {roundSessions(totalSched)}
                                   </span>
                                   <span className="text-[13px] font-bold text-foreground text-right">
-                                    {totalRemaining}
+                                    {roundSessions(totalRemaining)}
                                   </span>
                                   <span
                                     className={`text-[13px] font-bold text-right ${totalCreditSessions > 0 ? "text-success" : "text-muted-foreground"}`}

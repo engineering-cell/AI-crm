@@ -46,6 +46,7 @@ import CreateEnrollmentSheet from "@/components/enrollment/CreateEnrollmentSheet
 import { CreateEventPurchaseDialog } from "@/app/settings/setup/components/EventsPurchases";
 import CustomerMembershipsTab from "@/components/membership/CustomerMembershipsTab";
 import CustomerWalletTab from "@/components/wallet/CustomerWalletTab";
+import { useTerminalChargeSettled } from "@/lib/hooks/useTerminalChargeSettled";
 import CancelRefundDialog from "@/components/shared/CancelRefundDialog";
 import ConfirmStatusOverrideDialog from "@/components/customers/ConfirmStatusOverrideDialog";
 import CustomerStatusHistory from "@/components/customers/CustomerStatusHistory";
@@ -89,7 +90,8 @@ import { useCustomerLifecycleStatuses } from "@/lib/use-customer-lifecycle";
 import StatusColorBadge from "@/components/shared/StatusColorBadge";
 import { formatReasonLabel } from "@/lib/dynamic-list-normalize";
 import { extractLeadReasonsList } from "@/lib/workflow-normalize";
-import { buildPackageSessionOrder, resolveEventPayment } from "@/lib/event-payment";
+import { buildPackageSessionOrder, resolveEventPayment, membershipCoverageFor, buildPaymentContext, isPayableLesson } from "@/lib/event-payment";
+import { useUnpaidLessons } from "@/lib/hooks/useUnpaidLessons";
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 // Short name for an enrollment. A real package uses its template name; a
@@ -6196,6 +6198,7 @@ function PaymentsTab({ customerID }) {
   useEffect(() => {
     load(page);
   }, [load, page]);
+  useTerminalChargeSettled(() => load(page));
 
   const totalPages = Math.max(1, Math.ceil(total / LIMIT));
 
@@ -7308,20 +7311,13 @@ function LessonsTab({ customer }) {
     // Same coverage the calendar builds, so a lesson an active membership covers
     // reads Paid on both screens.
     api.get(`/api/customer-membership/customer/${customer._id}`).then((res) => {
-      const set = new Set();
-      (res.success && Array.isArray(res.data) ? res.data : []).forEach((m) => {
-        if (m.status !== "active") return;
-        (m.services || []).forEach((s) => {
-          if (s.serviceCode) set.add(`${customer._id}::${s.serviceCode}`);
-        });
-      });
-      setMembershipCoverageSet(set);
+      setMembershipCoverageSet(membershipCoverageFor(customer._id, res.success ? res.data : []));
     });
   }, [customer?._id]);
 
   // The calendar's own paid rule, judged on this student's charge.
   const paymentCtx = useMemo(
-    () => ({ ...buildPackageSessionOrder(events), membershipCoverageSet, customerID: custId }),
+    () => buildPaymentContext(events, membershipCoverageSet, custId),
     [events, membershipCoverageSet, custId],
   );
   const deriveEventPaid = (ev) => resolveEventPayment(ev, paymentCtx).paid;
@@ -7375,12 +7371,13 @@ function LessonsTab({ customer }) {
           (status === "cancelled" || isCancelledNoCharge)) ||
         (selectedStatuses.includes("no_show") && status === "no_show");
 
+      // Paid / Unpaid only mean something for a private or group lesson — a to-do never
+      // matches either filter.
       const matchesPayment =
         selectedPayments.length === 0 ||
-        (selectedPayments.includes("paid") && isPaid && !isCancelledNoCharge) ||
-        (selectedPayments.includes("unpaid") &&
-          !isPaid &&
-          !isCancelledNoCharge);
+        (isPayableLesson(ev) &&
+          ((selectedPayments.includes("paid") && isPaid && !isCancelledNoCharge) ||
+            (selectedPayments.includes("unpaid") && !isPaid && !isCancelledNoCharge)));
 
       return matchesStatus && matchesPayment;
     })
@@ -7499,6 +7496,8 @@ function LessonsTab({ customer }) {
             const isCancelledNoCharge =
               status === "cancelled_no_charge" ||
               status === "no_show_no_charge";
+            // Only a private or group lesson has a payment status; a to-do shows none.
+            const payable = isPayableLesson(ev);
             const paymentLabel = isCancelledNoCharge
               ? "No Charge"
               : isPaid
@@ -7569,11 +7568,13 @@ function LessonsTab({ customer }) {
                   >
                     {eventStatusLabel(status)}
                   </span>
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${paymentClass}`}
-                  >
-                    {paymentLabel}
-                  </span>
+                  {payable && (
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${paymentClass}`}
+                    >
+                      {paymentLabel}
+                    </span>
+                  )}
                 </div>
               </div>
             );
@@ -8113,8 +8114,11 @@ function ClickableRow({ onClick, className = "", children }) {
 
 // ─── Section index (Services / Billing / Records) ────────────────────────────
 
-function SectionIndex({ section, summary, onOpen }) {
+function SectionIndex({ section, summary, onOpen, customerID }) {
   const [expanded, setExpanded] = useState(null);
+  // Lessons nobody has paid for — surfaced on the Lessons row so a student who is
+  // behind can't go unnoticed until someone opens each lesson.
+  const unpaidLessons = useUnpaidLessons(section.views?.includes("lessons") ? customerID : null, summary.events);
 
   // Live counts so the index says something useful before you click into it.
   const stateFor = (viewId) => {
@@ -8186,6 +8190,7 @@ function SectionIndex({ section, summary, onOpen }) {
         return {
           value: next ? `Next ${formatStudioDate(next.startDateTime, null, { weekday: undefined, year: "numeric" })}` : "Nothing booked",
           hint: `${summary.events.length} in the last year`,
+          alert: unpaidLessons?.text || null,
         };
       }
       case "wallet":
@@ -8241,6 +8246,12 @@ function SectionIndex({ section, summary, onOpen }) {
                   <span className="block text-[11px] text-muted-foreground">
                     {meta.blurb}
                   </span>
+                  {state.alert && (
+                    <span className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-destructive">
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                      {state.alert}
+                    </span>
+                  )}
                 </span>
                 {state.value && (
                   <span className="hidden sm:block text-right shrink-0">
@@ -8987,6 +8998,7 @@ export default function CustomerDetailPage() {
   // Drill-in views change their own data (cancel, pay, enroll) — refresh the
   // shared summary on the way back so the indexes and Overview aren't stale.
   const { reload: reloadSummary } = summary;
+  useTerminalChargeSettled(reloadSummary);
   const prevViewRef = useRef(nav.view);
   useEffect(() => {
     if (prevViewRef.current && !nav.view) reloadSummary();
@@ -9167,7 +9179,7 @@ export default function CustomerDetailPage() {
         ) : section.id === "communication" ? (
           <CommunicationSection customer={customer} />
         ) : (
-          <SectionIndex section={section} summary={summary} onOpen={openView} />
+          <SectionIndex section={section} summary={summary} onOpen={openView} customerID={id} />
         )}
       </div>
     </MainLayout>

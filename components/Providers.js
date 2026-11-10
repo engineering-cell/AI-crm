@@ -10,6 +10,7 @@ import { analyticsSwrConfig } from '@/lib/hooks/useAnalyticsOverview'
 import { isAuthenticated } from '@/lib/auth'
 import { loadCachedStudioTimezone, resolveStudioTimezone } from '@/lib/hooks/useStudioTimezone'
 import { getStudioTimezone } from '@/lib/studioTimezone'
+import TerminalChargeTracker from '@/components/payments/TerminalChargeTracker'
 
 // Pages format dates while they render, so the studio timezone has to be known before
 // they mount — otherwise their first render uses the viewer's zone and never redoes it.
@@ -70,6 +71,7 @@ export default function Providers({ children }) {
         <InboxHeaderProvider>
           <StudioTimezoneGate>{children}</StudioTimezoneGate>
           <ThemedToaster />
+          <TerminalChargeTracker />
         </InboxHeaderProvider>
       </SWRConfig>
     </ThemeProvider>

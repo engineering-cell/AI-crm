@@ -3,9 +3,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 vi.mock('@/lib/api', () => ({ default: { get: vi.fn() }, getApiBaseUrl: () => 'https://api.test' }))
 vi.mock('@/components/ui/toast', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+// The location the user is working in, as the top-bar switcher reports it. Midtown unless a test says otherwise.
+vi.mock('@/lib/auth', () => ({ getEffectiveBranch: vi.fn(() => 'loc1') }))
 
-const { default: WebsiteEmbedDialog, buildEmbed, buildPreviewDoc, buildTestPageUrl, contrastRatio } = await import('../WebsiteEmbedDialog')
+const { default: WebsiteEmbedDialog, buildAiGuideUrl, buildAiPrompt, buildEmbed, buildPreviewDoc, buildTestPageUrl, contrastRatio, defaultLocationIds } = await import('../WebsiteEmbedDialog')
 const { default: api } = await import('@/lib/api')
+const { getEffectiveBranch } = await import('@/lib/auth')
+const { toast } = await import('@/components/ui/toast')
 
 const { widgetAttrs } = await import('../../../../booking-test/page')
 
@@ -152,5 +156,101 @@ describe('buildEmbed', () => {
     expect(buildEmbed({ base, format: 'link', locationIds: ['a'], accent: '#112233' })).toBe(`${base}/page/a?accent=%23112233`)
     const frame = buildEmbed({ base, format: 'iframe', locationIds: ['a'] })
     expect(frame).toContain(`<iframe src="${base}/page/a"`)
+  })
+})
+
+describe('AI instructions', () => {
+  it('points at the public guide with the studio location id', () => {
+    expect(buildAiGuideUrl({ apiBase: 'https://api.test', locationId: 'abc123' })).toBe('https://api.test/public/embed/llms.txt?location=abc123')
+    expect(buildAiGuideUrl({ apiBase: 'https://api.test' })).toBe('https://api.test/public/embed/llms.txt')
+    expect(buildAiGuideUrl({ apiBase: '', locationId: 'abc' })).toBe('')
+    expect(buildAiGuideUrl({ apiBase: 'https://api.test', locationId: 'a&b=c' })).toContain('location=a%26b%3Dc')
+  })
+
+  it('ends with a line for the owner to describe the look, and lists several locations', () => {
+    const one = buildAiPrompt({ guide: '  GUIDE  ', locations: [{ _id: 'a', name: 'Midtown' }] })
+    expect(one.startsWith('GUIDE')).toBe(true)
+    expect(one).not.toContain('several locations')
+    expect(one.endsWith('What I want my booking widget to look like: ')).toBe(true)
+    const many = buildAiPrompt({ guide: 'GUIDE', locations: [{ _id: 'a', name: 'Midtown' }, { _id: 'b', name: 'Uptown' }] })
+    expect(many).toContain('- Midtown: a')
+    expect(many).toContain('- Uptown: b')
+  })
+
+  it('copies the fetched guide without sending the CRM login, and reports failure', async () => {
+    api.get.mockResolvedValue({ success: true, data: [{ _id: 'loc1', name: 'Midtown' }] })
+    const writeText = vi.fn().mockResolvedValue()
+    Object.assign(navigator, { clipboard: { writeText } })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, text: async () => '# Cadance embeds\nGUIDE BODY' })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<WebsiteEmbedDialog open onClose={() => {}} />)
+    const button = await screen.findByRole('button', { name: 'Copy AI instructions' })
+    await waitFor(() => expect(button.disabled).toBe(false))
+    fireEvent.click(button)
+
+    await waitFor(() => expect(writeText).toHaveBeenCalled())
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.test/public/embed/llms.txt?location=loc1')
+    expect(fetchMock.mock.calls[0][1]).toEqual({ credentials: 'omit' })
+    expect(writeText.mock.calls[0][0]).toContain('GUIDE BODY')
+    expect(writeText.mock.calls[0][0]).toContain('What I want my booking widget to look like:')
+    expect(toast.success).toHaveBeenCalled()
+
+    fetchMock.mockResolvedValue({ ok: false, status: 500, text: async () => '' })
+    fireEvent.click(button)
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    vi.unstubAllGlobals()
+  })
+})
+
+describe('location defaults', () => {
+  const two = [{ _id: 'loc1', name: 'Midtown' }, { _id: 'loc2', name: 'Uptown' }]
+
+  it('starts with the location the user is already in', () => {
+    expect(defaultLocationIds({ locations: two, activeBranch: 'loc2' })).toEqual(['loc2'])
+  })
+
+  it('starts with every location for "All Branches"', () => {
+    expect(defaultLocationIds({ locations: two, activeBranch: null })).toEqual(['loc1', 'loc2'])
+  })
+
+  it('falls back to the first location when the active one is not offered, and to nothing when there are none', () => {
+    expect(defaultLocationIds({ locations: two, activeBranch: 'closed-branch' })).toEqual(['loc1'])
+    expect(defaultLocationIds({ locations: [], activeBranch: 'loc1' })).toEqual([])
+  })
+
+  it('pre-selects the active location in the dialog without any clicking', async () => {
+    getEffectiveBranch.mockReturnValue('loc2')
+    api.get.mockResolvedValue({ success: true, data: two })
+    render(<WebsiteEmbedDialog open onClose={() => {}} />)
+    const frame = await screen.findByTitle('Booking widget preview')
+    await waitFor(() => expect(frame.getAttribute('srcdoc')).toContain('data-location="loc2"'))
+    expect(screen.getByLabelText('Uptown').checked).toBe(true)
+    expect(screen.getByLabelText('Midtown').checked).toBe(false)
+    expect(screen.getByText(/Set to the location you’re working in/)).toBeTruthy()
+    // A manual tick is respected, not overwritten by the default.
+    fireEvent.click(screen.getByLabelText('Midtown'))
+    await waitFor(() => expect(frame.getAttribute('srcdoc')).toContain('data-location="loc1,loc2"'), { timeout: 2000 })
+    getEffectiveBranch.mockReturnValue('loc1')
+  })
+
+  it('selects every location for "All Branches"', async () => {
+    getEffectiveBranch.mockReturnValue(null)
+    api.get.mockResolvedValue({ success: true, data: two })
+    render(<WebsiteEmbedDialog open onClose={() => {}} />)
+    const frame = await screen.findByTitle('Booking widget preview')
+    await waitFor(() => expect(frame.getAttribute('srcdoc')).toContain('data-location="loc1,loc2"'))
+    expect(screen.getByText(/Showing all your locations/)).toBeTruthy()
+    getEffectiveBranch.mockReturnValue('loc1')
+  })
+
+  it('shows a plain location name, with no boxes, when there is only one, and skips closed ones', async () => {
+    api.get.mockResolvedValue({ success: true, data: [{ _id: 'loc1', name: 'Midtown', status: 'active' }, { _id: 'loc9', name: 'Old Branch', status: 'inactive' }] })
+    render(<WebsiteEmbedDialog open onClose={() => {}} />)
+    const frame = await screen.findByTitle('Booking widget preview')
+    await waitFor(() => expect(frame.getAttribute('srcdoc')).toContain('data-location="loc1"'))
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.queryByText('Old Branch')).toBeNull()
+    expect(screen.getByText('Midtown')).toBeTruthy()
   })
 })

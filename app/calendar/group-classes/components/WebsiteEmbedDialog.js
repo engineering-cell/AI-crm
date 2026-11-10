@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import api, { getApiBaseUrl } from '@/lib/api'
+import { getEffectiveBranch } from '@/lib/auth'
 import { toast } from '@/components/ui/toast'
 
 const FORMATS = [
@@ -119,10 +120,44 @@ export function buildTestPageUrl({ locationIds, tag, accent, bg = LIGHT.bg, text
   return `/booking-test?${params}`
 }
 
+/**
+ * Address of the plain-text instructions an AI assistant needs to write this studio's embed.
+ * Public and read-only: it holds the option list and the studio's location id, nothing else.
+ */
+export function buildAiGuideUrl({ apiBase, locationId }) {
+  if (!apiBase) return ''
+  return `${apiBase}/public/embed/llms.txt${locationId ? `?location=${encodeURIComponent(locationId)}` : ''}`
+}
+
+/**
+ * Text to paste into ChatGPT, Claude or any assistant: the instructions, the studio's other
+ * locations when there are several, and a line to finish with the owner's own request.
+ */
+export function buildAiPrompt({ guide, locations = [] }) {
+  const extra = locations.length > 1
+    ? `\n\nThis studio has several locations (use data-location="id1,id2" to show them together):\n${locations.map((l) => `- ${l.name}: ${l._id}`).join('\n')}`
+    : ''
+  return `${guide.trim()}${extra}\n\n---\nWhat I want my booking widget to look like: `
+}
+
+/**
+ * Which locations the embed starts with, so nobody has to tick the one they are already in.
+ * The CRM's active location wins; "All Branches" (superadmin, nothing chosen) starts with every
+ * location, which the widget shows as a branch menu; an active id that isn't in the list
+ * (a closed branch, say) falls back to the first one rather than an empty embed.
+ */
+export function defaultLocationIds({ locations, activeBranch }) {
+  if (!locations.length) return []
+  if (!activeBranch) return locations.map((l) => l._id)
+  return locations.some((l) => l._id === activeBranch) ? [activeBranch] : [locations[0]._id]
+}
+
 /** Copy-paste embed that lets visitors see this studio's classes and book them on its own website. */
 export default function WebsiteEmbedDialog({ open, onClose }) {
   const [locations, setLocations] = useState([])
   const [selected, setSelected] = useState([])
+  // Once the owner ticks a box themselves, stop re-applying the default for this opening.
+  const [picked, setPicked] = useState(false)
   const [tag, setTag] = useState('')
   const [accent, setAccent] = useState('#a8155f')
   const [bg, setBg] = useState(LIGHT.bg)
@@ -136,14 +171,24 @@ export default function WebsiteEmbedDialog({ open, onClose }) {
 
   useEffect(() => {
     if (!open || locations.length) return
-    api.get('/api/location?limit=50').then((res) => {
+    api.get('/api/location?limit=200').then((res) => {
       if (!res.success || !Array.isArray(res.data)) return
-      setLocations(res.data)
-      setSelected((prev) => (prev.length || !res.data[0] ? prev : [res.data[0]._id]))
+      // Same rule as the top-bar switcher: closed locations aren't offered.
+      setLocations(res.data.filter((l) => l.status?.toLowerCase() !== 'inactive'))
     })
   }, [open, locations.length])
 
+  // Start from the location the user is already working in, each time the dialog opens.
+  useEffect(() => {
+    if (open) setPicked(false)
+  }, [open])
+  useEffect(() => {
+    if (!open || picked || !locations.length) return
+    setSelected(defaultLocationIds({ locations, activeBranch: getEffectiveBranch() }))
+  }, [open, picked, locations])
+
   function toggleLocation(id) {
+    setPicked(true)
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   }
 
@@ -202,6 +247,23 @@ export default function WebsiteEmbedDialog({ open, onClose }) {
     }
   }
 
+  const aiGuideUrl = buildAiGuideUrl({ apiBase: getApiBaseUrl(), locationId: locationIds[0] })
+  const chosenLocations = locations.filter((l) => locationIds.includes(l._id))
+
+  // Fetched with a plain request, not the CRM api client, so the CRM login token is never sent.
+  // Many assistants can't open links, so the full text is copied rather than just the address.
+  async function copyAiInstructions() {
+    try {
+      const res = await fetch(aiGuideUrl, { credentials: 'omit' })
+      if (!res.ok) throw new Error(`status ${res.status}`)
+      const prompt = buildAiPrompt({ guide: await res.text(), locations: chosenLocations })
+      await navigator.clipboard.writeText(prompt)
+      toast.success('AI instructions copied — paste them into ChatGPT or any AI assistant')
+    } catch {
+      toast.error('Could not copy the instructions. Open the instructions page and copy the text from there.')
+    }
+  }
+
   return (
     <Dialog open={open} onClose={onClose} maxWidth="6xl">
       <DialogContent onClose={onClose}>
@@ -215,18 +277,30 @@ export default function WebsiteEmbedDialog({ open, onClose }) {
         <div className="grid gap-6 py-2 lg:grid-cols-2">
         <div className="min-w-0 space-y-4">
           <div className="space-y-1.5">
-            <Label>Locations</Label>
-            <div className="flex flex-wrap gap-2">
-              {locations.map((l) => (
-                <label
-                  key={l._id}
-                  className="flex cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground"
-                >
-                  <input type="checkbox" checked={selected.includes(l._id)} onChange={() => toggleLocation(l._id)} />
-                  {l.name}
-                </label>
-              ))}
-            </div>
+            <Label>{locations.length > 1 ? 'Locations' : 'Location'}</Label>
+            {locations.length === 1 ? (
+              // Nothing to choose: the embed is for the only location.
+              <p className="text-sm text-foreground">{locations[0].name}</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {locations.map((l) => (
+                  <label
+                    key={l._id}
+                    className="flex cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground"
+                  >
+                    <input type="checkbox" checked={selected.includes(l._id)} onChange={() => toggleLocation(l._id)} />
+                    {l.name}
+                  </label>
+                ))}
+              </div>
+            )}
+            {locations.length > 1 && !picked && locationIds.length > 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                {locationIds.length === locations.length
+                  ? 'Showing all your locations. Untick any you don’t want.'
+                  : 'Set to the location you’re working in. Tick more to add them.'}
+              </p>
+            )}
             {locationIds.length > 1 && format === 'script' && (
               <p className="text-[11px] text-muted-foreground">Visitors pick their location from a menu on the schedule.</p>
             )}
@@ -359,6 +433,24 @@ export default function WebsiteEmbedDialog({ open, onClose }) {
             <Button onClick={copy} disabled={!snippet} className="bg-brand text-brand-foreground hover:bg-brand-dark">
               {format === 'link' ? 'Copy link' : 'Copy code'}
             </Button>
+          </div>
+
+          <div className="space-y-2 rounded-lg border border-border p-3">
+            <Label>Customise with ChatGPT or another AI</Label>
+            <p className="text-[11px] text-muted-foreground">
+              Copy these instructions into ChatGPT, Claude or any AI assistant, then describe the look you want.
+              It will write the code to paste on your website. Only your location ID is included, nothing private.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" variant="outline" size="sm" onClick={copyAiInstructions} disabled={!aiGuideUrl || !locationIds.length}>
+                Copy AI instructions
+              </Button>
+              {aiGuideUrl && locationIds.length > 0 && (
+                <a href={aiGuideUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand underline">
+                  Open instructions page
+                </a>
+              )}
+            </div>
           </div>
         </div>
 

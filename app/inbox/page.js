@@ -297,6 +297,7 @@ function InboxPageContent() {
   const [smsSending, setSmsSending] = useState(false)
   const [callPlacing, setCallPlacing] = useState(false)
   const [callLogsLoading, setCallLogsLoading] = useState(false)
+  const [promoteSaving, setPromoteSaving] = useState(false)
   const [activeOutboundCall, setActiveOutboundCall] = useState(null)
   const [activeOutboundConnection, setActiveOutboundConnection] = useState(null)
   const [outboundCallStatus, setOutboundCallStatus] = useState('connecting')
@@ -410,15 +411,18 @@ function InboxPageContent() {
 
       const threads = {}
 
-      // Build SMS conversations from new API shape
-      const smsConversations = smsConvs.map((conv) => {
+      // Build SMS conversations from new API shape.
+      // Same number in two formats must not produce two rows with one React key.
+      const smsById = new Map()
+      for (const conv of smsConvs) {
         // Inbox-only numbers have no leadID — key them by number.
         const convId = conv.leadID ? `lead-${conv.leadID}` : numberConversationId(conv.phoneNumber)
         // messages not loaded yet for non-top leads — undefined signals "not fetched"
-        return {
+        const next = {
           id: convId,
           contact: {
             id: conv.leadID || null,
+            inboxContactID: conv.inboxContactID || null,
             name: conv.leadID
               ? getContactDisplayName({ name: conv.name, phoneNumber: conv.phoneNumber, email: conv.email })
               : conv.name || '',
@@ -430,14 +434,22 @@ function InboxPageContent() {
             locationID: conv.locationID || [],
             convertedCustomerID: conv.convertedCustomerID || null,
             leadSourceID: conv.leadSourceID || null,
+            reason: conv.reason || '',
+            evidence: conv.evidence || '',
           },
           lastMessage: conv.lastMessage,
           timestamp: conv.lastMessageAt,
           lastInboundAt: conv.lastInboundAt || null,
           unread: 0,
-          channel: 'SMS',
+          // Call-only Others open on the Call tab; everyone else stays on SMS.
+          channel: String(conv.channel || '').toLowerCase() === 'call' ? 'Call' : 'SMS',
         }
-      })
+        const prev = smsById.get(convId)
+        if (!prev || new Date(conv.lastMessageAt || 0) > new Date(prev.timestamp || 0)) {
+          smsById.set(convId, next)
+        }
+      }
+      const smsConversations = [...smsById.values()]
 
       // Build email conversations from history
       const { conversations: emailConvs, threadMessages: emailThreads } = buildInboxData([], emailRecords)
@@ -1475,12 +1487,19 @@ function InboxPageContent() {
   const handleRenameContact = async (name) => {
     const conv = conversations.find((c) => c.id === selectedConversation)
     const phoneNumber = conv?.contact?.phoneNumber
+    const email = conv?.contact?.email
+    const inboxContactID = conv?.contact?.inboxContactID
     const leadId = conv?.contact?.id
-    if (!phoneNumber && !leadId) return false
-    // A lead is renamed on the lead record; a bare number on its inbox contact.
+    if (!phoneNumber && !email && !inboxContactID && !leadId) return false
+    // A lead is renamed on the lead record; a bare number/email on its inbox contact.
     const res = leadId
       ? await api.put(`/api/lead/${leadId}`, { name })
-      : await api.put('/api/inbox/contacts', { phoneNumber, name })
+      : await api.put('/api/inbox/contacts', {
+          ...(inboxContactID ? { inboxContactID } : {}),
+          ...(phoneNumber ? { phoneNumber } : {}),
+          ...(email ? { email } : {}),
+          name,
+        })
     if (!res.success) {
       toast.error({ title: 'Name not saved', message: res.error || 'Try again.' })
       return false
@@ -1490,6 +1509,47 @@ function InboxPageContent() {
     )
     toast.success({ title: name ? 'Name saved' : 'Name removed' })
     return true
+  }
+
+  const handlePromoteToLead = async () => {
+    const conv = conversations.find((c) => c.id === selectedConversation)
+    const inboxContactID = conv?.contact?.inboxContactID
+    const phoneNumber = conv?.contact?.phoneNumber
+    const email = conv?.contact?.email
+    if (!inboxContactID && !phoneNumber && !email) {
+      toast.error({
+        title: 'Cannot promote',
+        message: 'This Other contact has no saved inbox record yet. Send a message first, then try again.',
+      })
+      return
+    }
+    setPromoteSaving(true)
+    try {
+      const res = inboxContactID
+        ? await api.post(`/api/inbox/contacts/${encodeURIComponent(inboxContactID)}/promote`, {})
+        : await api.post('/api/inbox/contacts/promote', {
+            ...(phoneNumber ? { phoneNumber } : {}),
+            ...(email ? { email } : {}),
+          })
+      if (!res.success) {
+        toast.error({ title: 'Promote failed', message: res.error || 'Try again.' })
+        return
+      }
+      const leadID = res.data?.leadID || res.data?.lead?._id
+      toast.success({
+        title: 'Moved to Leads',
+        message: 'This contact is now a lead. Campaigns and the agent can run on the next message.',
+      })
+      await fetchInboxData()
+      if (leadID) {
+        const nextId = `lead-${leadID}`
+        selectedConversationRef.current = nextId
+        setSelectedConversation(nextId)
+        setContactFilter('Leads')
+      }
+    } finally {
+      setPromoteSaving(false)
+    }
   }
 
   const filterRecordsByRecipient = (records, contactEmail) => {
@@ -1623,10 +1683,16 @@ function InboxPageContent() {
         forwardParams.set('customerID', customerId)
       }
 
+      const aiCallUrl = leadID
+        ? `/api/ai-calling?leadID=${encodeURIComponent(leadID)}&limit=100`
+        : phoneNumber
+          ? `/api/ai-calling?phoneNumber=${encodeURIComponent(phoneNumber)}&limit=100`
+          : null
+
       const [humanRes, aiRes, forwardRes] = await Promise.all([
         api.get(`/api/human-call/history?${humanParams.toString()}`),
-        leadID
-          ? api.get(`/api/ai-calling?leadID=${encodeURIComponent(leadID)}&limit=100`)
+        aiCallUrl
+          ? api.get(aiCallUrl)
           : Promise.resolve({ success: false, data: [] }),
         api.get(`/api/inbound-call/history?${forwardParams.toString()}`).catch(() => ({
           success: false,
@@ -1639,10 +1705,13 @@ function InboxPageContent() {
       const humanCalls = Array.isArray(humanRes.data) ? humanRes.data : []
       const aiCalls = Array.isArray(aiRes.data) ? aiRes.data : []
       const forwardedCalls = Array.isArray(forwardRes.data) ? forwardRes.data : []
+      // Only Inbox Others draw inbound AI calls on the left; lead/customer stay right.
+      const treatInboundAsInbound =
+        String(conv?.contact?.type || '').toLowerCase() === 'other'
 
       const callMsgs = [
         ...humanCalls.map(mapHumanCallToMessage),
-        ...aiCalls.map(mapAiCallToMessage),
+        ...aiCalls.map((call) => mapAiCallToMessage(call, { treatInboundAsInbound })),
         ...forwardedCalls.map(mapForwardedCallToMessage),
       ].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
 
@@ -2323,6 +2392,12 @@ function InboxPageContent() {
               onCallTabActive={handleCallTabActive}
               onMarkUnread={handleMarkUnread}
               onRenameContact={handleRenameContact}
+              onPromoteToLead={
+                String(selectedConvData?.contact?.type || '').toLowerCase() === 'other'
+                  ? handlePromoteToLead
+                  : null
+              }
+              promoteSaving={promoteSaving}
               aiRepliesOn={leadAiRepliesOn(selectedLeadData)}
               aiToggleSaving={aiToggleSaving}
               onToggleAiReplies={selectedLeadData?._id ? handleToggleAiReplies : null}

@@ -541,9 +541,14 @@ function InboxPageContent() {
   // Studio-wide read state (see lib/inbox-messaging). The old per-browser copy
   // is merged into it once, so nothing someone already read turns unread again.
   const legacyReadStateKey = `inbox-read:${getCurrentUserId() || 'me'}`
+  // 'local' when the API has no shared read state (older backend): this browser keeps it.
+  const [readStateSource, setReadStateSource] = useState(null)
   const loadReadState = useCallback(async () => {
     const res = await api.get('/api/inbox/read-state')
-    if (res?.success && res.data) setReadState(readStateFromServer(res.data))
+    if (res?.success && res.data) {
+      setReadState(readStateFromServer(res.data))
+      setReadStateSource('server')
+    }
   }, [])
 
   useEffect(() => {
@@ -559,6 +564,7 @@ function InboxPageContent() {
       if (cancelled) return
       if (!res?.success || !res.data) {
         setReadState(local?.baseline ? local : emptyReadState())
+        setReadStateSource('local')
         return
       }
       let data = res.data
@@ -576,12 +582,23 @@ function InboxPageContent() {
           }
         }
       }
-      if (!cancelled) setReadState(readStateFromServer(data))
+      if (cancelled) return
+      setReadState(readStateFromServer(data))
+      setReadStateSource('server')
     })()
     return () => {
       cancelled = true
     }
   }, [legacyReadStateKey])
+
+  useEffect(() => {
+    if (readStateSource !== 'local' || !readState) return
+    try {
+      localStorage.setItem(legacyReadStateKey, JSON.stringify(readState))
+    } catch {
+      // Private mode / storage full — unread still works for this session.
+    }
+  }, [readState, readStateSource, legacyReadStateKey])
 
   // Pick up conversations other staff opened or marked unread.
   useEffect(() => {

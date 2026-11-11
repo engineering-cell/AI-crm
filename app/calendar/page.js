@@ -13,7 +13,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, ChevronDown, Settings2 } from 
 import AppointmentComposerPanel from "./components/AppointmentComposerPanel";
 import EventDetailPanel from "./components/EventDetailPanel";
 import api from "@/lib/api";
-import { cn, formatDate } from "@/lib/utils";
+import { cn, formatDate, roundSessions } from "@/lib/utils";
 import { toStudioLocalDate } from "@/lib/studioLocalDate";
 import { deriveEffectiveStatus } from "@/lib/eventStatus";
 import { buildPackageSessionOrder, resolveEventPayment } from "@/lib/event-payment";
@@ -1061,7 +1061,7 @@ function showGroupEventTooltip(e, props, raw) {
       return null;
     })();
     if (left > 0) {
-      credits = `<span style="color:${left <= 1 ? "#ef4444" : "#22c55e"};font-size:10px">${left} left</span>`;
+      credits = `<span style="color:${left <= 1 ? "#ef4444" : "#22c55e"};font-size:10px">${roundSessions(left)} left</span>`;
     }
 
     const paid = Boolean(charge) && payment?.paid !== false;
@@ -1334,7 +1334,7 @@ function showEventTooltip(e, props) {
       // Match the booking rule (a session is covered at >= 0.999 credits) so the
       // tooltip never disagrees with what can actually be scheduled.
       const schedulableTooltip = Math.max(0, Math.floor(sessionsPaidForTooltip + 0.001) - sessionsUsedTooltip);
-      return section("Credits", `<span style="color:${schedulableTooltip <= 1 ? "#ef4444" : "#22c55e"}">${schedulableTooltip} schedulable</span> <span style="opacity:.6">(${sessionsRemaining}/${totalSessions} remaining)</span>`);
+      return section("Credits", `<span style="color:${schedulableTooltip <= 1 ? "#ef4444" : "#22c55e"}">${schedulableTooltip} schedulable</span> <span style="opacity:.6">(${roundSessions(sessionsRemaining)}/${roundSessions(totalSessions)} remaining)</span>`);
     })() : ""}
     ${divider}
     <div style="display:flex;align-items:center;gap:6px;margin:2px 0">
@@ -1457,7 +1457,7 @@ function AppointmentTimedEventRows({ event, compact = false }) {
     const remaining = pkgSessionNumber != null
       ? Math.max(0, totalSessions - pkgSessionNumber)
       : sessionsRemaining;
-    return `${remaining}/${totalSessions}`;
+    return `${roundSessions(remaining)}/${roundSessions(totalSessions)}`;
   })();
 
   // A payment-link hold has no student yet (the lead isn't a customer until they

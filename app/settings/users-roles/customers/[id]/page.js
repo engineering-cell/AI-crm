@@ -80,7 +80,7 @@ import {
 import { getStudioTimezone } from "@/lib/studioTimezone";
 import { fetchWalletBalance } from "@/lib/wallet";
 import { useToast } from "@/components/ui/toast";
-import { getInitials, formatDate, formatDateTime } from "@/lib/utils";
+import { getInitials, formatDate, formatDateTime, roundSessions } from "@/lib/utils";
 import {
   customerLifecycleColor,
   customerLifecycleLabel,
@@ -154,9 +154,6 @@ function paymentTypeBadge(type) {
   );
 }
 
-// Session counts can be fractional (e.g. 16.8) and float subtraction leaves noise
-// like 5.800000000000001 — round to 2dp so the UI never shows it.
-const roundSessions = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 function SessionBar({ used, total }) {
   const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0;
@@ -8000,9 +7997,9 @@ function useAccountSummary(customerID) {
           .forEach((svc) => {
           const total = svc.sessionsTotal ?? 0;
           const used = svc.sessionsUsed ?? 0;
-          acc.total += total;
+          acc.total += roundSessions(total);
           acc.used += used;
-          acc.remaining += Math.max(0, total - used);
+          acc.remaining += Math.max(0, roundSessions(total) - roundSessions(used));
         });
         return acc;
       },

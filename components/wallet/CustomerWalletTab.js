@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useTerminalChargeSettled } from "@/lib/hooks/useTerminalChargeSettled";
 import {
   Wallet,
   Plus,
@@ -341,6 +342,8 @@ export default function CustomerWalletTab({ customerID, locationID }) {
     loadBalance();
     loadTxns(page);
   };
+  // A reader charge that ends (paid / cancelled) changes the balance behind the toast.
+  useTerminalChargeSettled(refresh);
 
   const clearFilters = () => {
     setTypeFilter("");

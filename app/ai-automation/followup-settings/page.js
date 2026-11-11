@@ -48,8 +48,43 @@ function AutoGrowTextarea({ value, minRows = 4, className, ...props }) {
   )
 }
 
+// The API stores the wait as hours + minutes; days are entered here and sent as hours.
+const MAX_INTERVAL_HOURS = 72
+const MAX_INTERVAL_DAYS = Math.floor(MAX_INTERVAL_HOURS / 24)
+
+/** API hours → { intervalDays, intervalHours } for the form (e.g. 26 → 1 day 2 hours). */
+function splitIntervalHours(totalHours) {
+  const total = Math.max(0, Math.floor(Number(totalHours) || 0))
+  return { intervalDays: String(Math.floor(total / 24)), intervalHours: String(total % 24) }
+}
+
+/** Form days + hours + minutes → { intervalHours, intervalMinutes } for the API, or { error }. */
+function intervalForApi(item, { allowZero = false } = {}) {
+  const days = Number(item?.intervalDays || 0)
+  const hours = Number(item?.intervalHours || 0)
+  const minutes = Number(item?.intervalMinutes || 0)
+  if (!Number.isInteger(days) || days < 0 || days > MAX_INTERVAL_DAYS) {
+    return { error: `days must be 0–${MAX_INTERVAL_DAYS}.` }
+  }
+  if (!Number.isInteger(hours) || hours < 0 || hours > 23) {
+    return { error: 'hours must be 0–23.' }
+  }
+  if (!Number.isInteger(minutes) || minutes < 0 || minutes > 59) {
+    return { error: 'minutes must be 0–59.' }
+  }
+  const totalHours = days * 24 + hours
+  if (totalHours > MAX_INTERVAL_HOURS) {
+    return { error: `wait can be at most ${MAX_INTERVAL_HOURS} hours (${MAX_INTERVAL_DAYS} days).` }
+  }
+  if (!allowZero && totalHours === 0 && minutes === 0) {
+    return { error: 'interval must be greater than zero.' }
+  }
+  return { intervalHours: totalHours, intervalMinutes: minutes }
+}
+
 function emptyFollowup(overrides = {}) {
   return {
+    intervalDays: '0',
     intervalHours: '1',
     intervalMinutes: '0',
     useAiMessage: true,
@@ -68,7 +103,7 @@ function followupFromApi(item) {
   const message = item?.message ?? null
   const hasCustomMessage = typeof message === 'string' && message.trim().length > 0
   return emptyFollowup({
-    intervalHours: String(item?.intervalHours ?? 1),
+    ...splitIntervalHours(item?.intervalHours ?? 1),
     intervalMinutes: String(item?.intervalMinutes ?? 0),
     useAiMessage: !hasCustomMessage,
     message: hasCustomMessage ? message : '',
@@ -78,6 +113,7 @@ function followupFromApi(item) {
 function emptyFirstMessage(overrides = {}) {
   return {
     enabled: false,
+    intervalDays: '0',
     intervalHours: '0',
     intervalMinutes: '0',
     useAiMessage: true,
@@ -92,7 +128,7 @@ function firstMessageFromApi(entry) {
   const hasCustomMessage = typeof message === 'string' && message.trim().length > 0
   return emptyFirstMessage({
     enabled: true,
-    intervalHours: String(entry.intervalHours ?? 0),
+    ...splitIntervalHours(entry.intervalHours ?? 0),
     intervalMinutes: String(entry.intervalMinutes ?? 0),
     useAiMessage: !hasCustomMessage,
     message: hasCustomMessage ? message : '',
@@ -440,23 +476,10 @@ export default function FollowupSettingsPage() {
     const steps = []
     for (let i = 0; i < config.followups.length; i++) {
       const step = config.followups[i]
-      const hours = Number(step.intervalHours)
-      const minutes = Number(step.intervalMinutes)
       const stepLabel = `${label} · Follow-up ${i + 1}`
-
-      if (!Number.isInteger(hours) || hours < 0 || hours > 72) {
-        toast.error({ title: 'Validation', message: `${stepLabel}: hours must be 0–72.` })
-        return null
-      }
-      if (!Number.isInteger(minutes) || minutes < 0 || minutes > 59) {
-        toast.error({ title: 'Validation', message: `${stepLabel}: minutes must be 0–59.` })
-        return null
-      }
-      if (hours === 0 && minutes === 0) {
-        toast.error({
-          title: 'Validation',
-          message: `${stepLabel}: interval must be greater than zero.`,
-        })
+      const interval = intervalForApi(step)
+      if (interval.error) {
+        toast.error({ title: 'Validation', message: `${stepLabel}: ${interval.error}` })
         return null
       }
       if (!step.useAiMessage && !String(step.message || '').trim()) {
@@ -468,8 +491,8 @@ export default function FollowupSettingsPage() {
       }
 
       steps.push({
-        intervalHours: hours,
-        intervalMinutes: minutes,
+        intervalHours: interval.intervalHours,
+        intervalMinutes: interval.intervalMinutes,
         message: step.useAiMessage ? null : String(step.message).trim(),
       })
     }
@@ -477,14 +500,9 @@ export default function FollowupSettingsPage() {
     let firstMessage = null
     if (config.firstMessage?.enabled) {
       const firstLabel = `${label} · First message`
-      const hours = Number(config.firstMessage.intervalHours || 0)
-      const minutes = Number(config.firstMessage.intervalMinutes || 0)
-      if (!Number.isInteger(hours) || hours < 0 || hours > 72) {
-        toast.error({ title: 'Validation', message: `${firstLabel}: hours must be 0–72.` })
-        return null
-      }
-      if (!Number.isInteger(minutes) || minutes < 0 || minutes > 59) {
-        toast.error({ title: 'Validation', message: `${firstLabel}: minutes must be 0–59.` })
+      const interval = intervalForApi(config.firstMessage, { allowZero: true })
+      if (interval.error) {
+        toast.error({ title: 'Validation', message: `${firstLabel}: ${interval.error}` })
         return null
       }
       if (
@@ -498,8 +516,8 @@ export default function FollowupSettingsPage() {
         return null
       }
       firstMessage = {
-        intervalHours: hours,
-        intervalMinutes: minutes,
+        intervalHours: interval.intervalHours,
+        intervalMinutes: interval.intervalMinutes,
         message: config.firstMessage.useAiMessage
           ? null
           : String(config.firstMessage.message || '').trim(),
@@ -901,7 +919,33 @@ export default function FollowupSettingsPage() {
                               </div>
 
                               {config.firstMessage?.enabled ? (
-                                <div className="grid gap-4 sm:grid-cols-2">
+                                <div className="grid gap-4 sm:grid-cols-3">
+                                  <div className="space-y-2">
+                                    <label
+                                      htmlFor={`first-message-days-${cardKey}`}
+                                      className="text-sm font-medium"
+                                    >
+                                      Wait (days)
+                                    </label>
+                                    <Input
+                                      id={`first-message-days-${cardKey}`}
+                                      type="number"
+                                      min={0}
+                                      max={MAX_INTERVAL_DAYS}
+                                      value={config.firstMessage?.intervalDays ?? '0'}
+                                      onChange={(e) =>
+                                        updateStageConfig(stageIndex, {
+                                          firstMessage: {
+                                            ...(config.firstMessage || emptyFirstMessage()),
+                                            enabled: true,
+                                            intervalDays: e.target.value,
+                                          },
+                                        })
+                                      }
+                                      disabled={busy || scheduleDisabled}
+                                    />
+                                    <p className="text-xs text-muted-foreground">0–{MAX_INTERVAL_DAYS} days</p>
+                                  </div>
                                   <div className="space-y-2">
                                     <label
                                       htmlFor={`first-message-hours-${cardKey}`}
@@ -913,7 +957,7 @@ export default function FollowupSettingsPage() {
                                       id={`first-message-hours-${cardKey}`}
                                       type="number"
                                       min={0}
-                                      max={72}
+                                      max={23}
                                       value={config.firstMessage?.intervalHours ?? '0'}
                                       onChange={(e) =>
                                         updateStageConfig(stageIndex, {
@@ -926,7 +970,7 @@ export default function FollowupSettingsPage() {
                                       }
                                       disabled={busy || scheduleDisabled}
                                     />
-                                    <p className="text-xs text-muted-foreground">0–72 hours</p>
+                                    <p className="text-xs text-muted-foreground">0–23 hours</p>
                                   </div>
                                   <div className="space-y-2">
                                     <label
@@ -953,7 +997,7 @@ export default function FollowupSettingsPage() {
                                       disabled={busy || scheduleDisabled}
                                     />
                                     <p className="text-xs text-muted-foreground">
-                                      0–59 minutes · 0h 0m sends right away
+                                      0–59 minutes · all zero sends right away
                                     </p>
                                   </div>
                                 </div>
@@ -1069,7 +1113,29 @@ export default function FollowupSettingsPage() {
                                   </Button>
                                 </div>
 
-                                <div className="grid gap-4 sm:grid-cols-2">
+                                <div className="grid gap-4 sm:grid-cols-3">
+                                  <div className="space-y-2">
+                                    <label
+                                      htmlFor={`followup-days-${cardKey}-${stepIndex}`}
+                                      className="text-sm font-medium"
+                                    >
+                                      Wait (days)
+                                    </label>
+                                    <Input
+                                      id={`followup-days-${cardKey}-${stepIndex}`}
+                                      type="number"
+                                      min={0}
+                                      max={MAX_INTERVAL_DAYS}
+                                      value={step.intervalDays ?? '0'}
+                                      onChange={(e) =>
+                                        updateStageFollowup(stageIndex, stepIndex, {
+                                          intervalDays: e.target.value,
+                                        })
+                                      }
+                                      disabled={busy || scheduleDisabled}
+                                    />
+                                    <p className="text-xs text-muted-foreground">0–{MAX_INTERVAL_DAYS} days</p>
+                                  </div>
                                   <div className="space-y-2">
                                     <label
                                       htmlFor={`followup-hours-${cardKey}-${stepIndex}`}
@@ -1081,7 +1147,7 @@ export default function FollowupSettingsPage() {
                                       id={`followup-hours-${cardKey}-${stepIndex}`}
                                       type="number"
                                       min={0}
-                                      max={72}
+                                      max={23}
                                       value={step.intervalHours}
                                       onChange={(e) =>
                                         updateStageFollowup(stageIndex, stepIndex, {
@@ -1090,7 +1156,7 @@ export default function FollowupSettingsPage() {
                                       }
                                       disabled={busy || scheduleDisabled}
                                     />
-                                    <p className="text-xs text-muted-foreground">0–72 hours</p>
+                                    <p className="text-xs text-muted-foreground">0–23 hours</p>
                                   </div>
                                   <div className="space-y-2">
                                     <label

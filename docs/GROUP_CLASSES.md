@@ -5,10 +5,10 @@ Covers **both repos** — `AI-crm` (frontend) and `DanceStudio-CRM-Backend` (bac
 
 | | |
 |---|---|
-| Last updated | 2026-10-29 |
+| Last updated | 2026-11-02 |
 | Frontend branch | `feat/group-class-source-fe` |
 | Backend branch | `feat/group-class-source-be` |
-| Status | Phases 1–6 and 4b done · Phase 7 (backfill) is last, before deploy |
+| Status | Phases 1–6, 4b and 8 built · Phase 7 (backfill) is last, before deploy · Phase 8 needs the setup in §3 |
 
 ---
 
@@ -53,6 +53,7 @@ Lesson (class type)  ──►  ClassSchedule (weekly rule)  ──►  Calendar
 | 4b | AI agent sells a drop-in by payment link; the lead joins the class once they pay | ✅ Done — backend `af7e58e` |
 | 7 | Backfill existing series + retire old classes | ⏳ Next — **needed before deploy** (see §6) |
 | 5 | Website plugin (`/public/classes` + `embed.js` + "Website embed" button) | ✅ Done — backend `bda428e`, frontend `508aaee` |
+| 8 | Website booking widget: book and pay from the studio's own site | ✅ Built, not committed — branches `feat/embed-be` / `feat/embed-fe` |
 | — | Vapi webhook authentication (pre-existing gap) | ⚠️ Needs a decision (see §6) |
 
 ---
@@ -108,6 +109,40 @@ How it works: the agent describes the class → quotes the drop-in price → the
   - `GET /public/classes/:locationID/sessions?days&tag` — the same `listClassSessions()` rows as the staff week view and the AI agent: published schedules of active classes only, cancellations flagged, spots left (including held spots). Returned through a **whitelist** (`toPublicSession`): class name, description, tags, studio-local date/day/time, instructor first name, room, spots left, cancelled. **No ids, rosters, capacity or prices.** Unknown or malformed location → 404.
   - `GET /public/classes/embed.js` — `CadanceClasses.create({ locationId, target, tag?, days?, cssClass? })`. Renders with `textContent` only (no HTML injection from class text), under `.cadance-classes` / `.cadance-classes__item` so the studio's CSS can restyle it. Category/level filters come from class **tags** — there is no website-only schedule.
 - Frontend: `app/calendar/group-classes/components/WebsiteEmbedDialog.js` + a **Website embed** button on the Group classes page — pick a location (and optional tag), copy the snippet.
+
+**Website booking widget (Phase 8)**
+
+A studio pastes two lines on its site. Visitors see the schedule, verify their mobile number, then use a credit or pay. Flow: `class-booking-prototype.html`; rules: `Online-Class-Booking_Flow_v3.docx`. Where they differ, the steps follow the prototype and the rules follow the doc, because the doc is newer.
+
+```html
+<div data-cadance-booking data-location="LOCATION_ID"></div>
+<script src="https://API/public/booking/widget.js" async></script>
+```
+
+`data-location` takes several ids (`a,b`) and shows a location menu. Also `data-tag`, `data-days`, `data-accent`, `data-bg`, `data-text`, `data-font`, `data-heading-font`, `data-theme="dark"`, `data-title`. The schedule is a compact section: weekday tabs, date arrows for later weeks (4 weeks by default; `data-days` changes it), one row per class with View Details and Book. Shades (borders, muted text) are mixed from the text and background, and button text picks black or white to suit the button. `data-font` takes a listed Google font, which is then loaded from Google, or any font the site already has. Sites that strip scripts use the iframe or direct link to `/public/booking/page/:locationID`. The older read-only `/public/classes/embed.js` still works for anyone who pasted it.
+
+Steps: schedule → phone → code → who's attending (households only) or first name + email (new) → confirm with credits, or choose a package → pay → booked. A full class goes to the waitlist; a returning device skips phone and code.
+
+- `src/embeds/classBookingWidget.js` — the widget. Shadow DOM, so a site's CSS can't break it.
+- `src/routes/publicBooking.routes.js` — `/public/booking`. Its CORS is mounted **before** the restricted global cors in `app.js`, which would otherwise end the JSON preflight.
+- `src/services/bookingOtp.service.js` — Twilio Verify, limits (3 codes / 15 min per number, 10 / hour per IP, 5 misses lock 30 min), and the 180-day device token, per location, signed with a key derived from `JWT_SECRET` so it can never pass staff auth. Buying needs a code from the last 30 minutes.
+- `src/services/classBooking.service.js` — seats, credits, holds, checkout, settlement.
+  - **Last seat:** the capacity check is inside the update's own filter (`seatsAvailableClause`), so a race has one winner. Uses the native driver, as Mongoose's `$expr` casting rejects those operators.
+  - **Credits:** service-scoped; memberships first, then the package expiring soonest. Charge records match `refundCharges()`. Deliberately not `checkAndChargeService`, which checks and decrements separately.
+  - **Payment:** the location's hosted Stripe or Clover checkout in a new tab; the widget polls. One checkout per hold, so a double tap can't open two payable sessions. A pack's enrollment is created only once paid, so an abandoned checkout leaves nothing that can fund a booking.
+  - **New people:** a provisional Customer, **no Lead** — a new Lead starts the follow-up chain, and they only agreed to a one-time code.
+- `src/services/classWaitlist.service.js` + `src/schedulers/classWaitlist.scheduler.js` — a 2-minute sweep offers each freed seat to #1 by SMS with a 2-hour hold, then rolls on. Freed seats stay closed to the public while anyone waits.
+- `src/models/classBooking.model.js`, `classWaitlistEntry.model.js`, `bookingOtpGuard.model.js` *(new)*; `calendarEvent.heldSpots.waitlistEntryID`; `paymentRequest.classBookingID`, channel and soldVia `"web"`; `paymentSettlement.service.js` calls `fulfilPaidBooking`.
+- **Test page:** `/booking-test?location=ID` in the CRM (linked from the dialog), a pretend studio site with the live widget. Public route, on a different origin from the API like a real site. Unlike the preview, bookings there are real.
+- **Preview in the dialog:** the real widget with `data-preview` in a sandboxed frame (`allow-scripts allow-forms`, never `allow-same-origin`). It stops at the phone step, so no texts go out and no seats are held. It needs the backend running this widget version, as an older one would ignore the flag.
+- Frontend: `WebsiteEmbedDialog.js` rebuilt (locations, tag, colour, theme; code / iframe / link; live desktop/mobile preview), and the **Website embed** button is back on the Group classes page.
+
+**Setup before it can go live**
+1. Create a Twilio Verify service and set `TWILIO_VERIFY_SERVICE_SID`. Without it the phone step answers 503.
+2. Set `PUBLIC_API_BASE_URL`, or waitlist offers can't include a link and are skipped.
+3. Each class needs a billing service with a code and price; packs must contain only that service to be listed.
+
+**Run its tests:** `BOOKING_TEST_MONGO_URI=mongodb://127.0.0.1:27017 node --test --test-force-exit src/services/classBooking.integration.test.js` (skipped without that variable; replaces Twilio and the database before app code loads).
 
 ### API — `/api/class-schedule` (permission: calendar › lessons)
 
@@ -226,6 +261,14 @@ Open http://localhost:3100 → Calendar › Group Classes.
 - A lead who already has a group package still pays the drop-in price; using a package session instead isn't built.
 - On calls, an existing customer gets "a team member will follow up" instead of a link.
 
+**Open decisions on the booking widget (Phase 8)**
+- **Cancelling by text:** the doc has Kira remove the student, return the credit and offer the seat on. The widget shows that promise, but Kira's side isn't built here. A staff roster edit does free the seat for the waitlist; check how credits come back, and a paid single class has no credit to return yet (`refundCharges` is a no-op on `direct`).
+- **Inline card form:** the prototype and doc show one on the page. Clover studios have only the hosted page, so all studios use hosted checkout for now.
+- **Abandoned-checkout text:** not sent. The prototype requires opt-in at the phone step, which needs agreed consent wording first.
+- **Reminder timing:** the existing 24-hour reminder is unchanged. The doc asks for 2 hours with new wording, which would change it for every class.
+- **Waiver tick-box:** not added; there's no waiver text to show. The existing first-visit waiver job still runs.
+- **Staff can't see the waitlist in the CRM yet** (data is in `classwaitlistentries`), and accepting an offer is by link, not by replying to the text.
+
 **Not built yet (add when needed)**
 - Spots left on calendar cards.
 - Enrolling a student in all following sessions of a schedule.
@@ -240,4 +283,5 @@ Open http://localhost:3100 → Calendar › Group Classes.
 - **2026-10-22** — Found by hand-testing in Postman (backend `c6efa81`): a lead who texted "done!" without paying was told "you're all set". The agent had no payment signal; the prompt now says each turn whether the lead's group class link is unpaid (never confirm) or paid (they are enrolled). Verified unpaid → "I don't see the payment", paid → "you're enrolled".
 - **2026-10-22** — Phase 5: public class schedule endpoint, `embed.js` and a Website embed dialog for staff.
 - **2026-10-21** — Phase 4b (backend `af7e58e`): the agent sells a group class drop-in by payment link and seats the lead on the roster once they pay. Live LLM conversation → link → payment → roster: 14/14; voice via simulated webhook: 5/5; no regressions across 268 payment/agent tests.
+- **2026-11-02** — Phase 8: website booking widget, seat holds, group credit spending, waitlist with SMS offers, rebuilt embed dialog.
 - **2026-10-29** — Editing gaps closed: a schedule's **start date** is now editable (applied "from this date forward"; empty sessions before the new start are removed, booked ones block with a 409). Editing a class's **colour** or **billing service** now updates its upcoming scheduled sessions on the calendar (previously only a rename did). Schedule **location** is still fixed after creation — end the schedule and create a new one.

@@ -22,6 +22,7 @@ import CheckNumberField from "@/components/payments/CheckNumberField";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import LocationSelector from "@/components/shared/LocationSelector";
 import MiniStudentPanel from "./MiniStudentPanel";
+import { roundSessions } from "@/lib/utils";
 import { resolveEventPayment } from "@/lib/event-payment";
 import CreateEnrollmentSheet from "@/components/enrollment/CreateEnrollmentSheet";
 import GroupClassDrawer from "@/app/calendar/group-classes/components/GroupClassDrawer";
@@ -1231,7 +1232,7 @@ function GroupStudentRoster({
                     <span
                       className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${remaining <= 2 ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-primary"}`}
                     >
-                      {remaining} left
+                      {roundSessions(remaining)} left
                     </span>
                   )}
                   {!isCharged && !membershipCustomerIds.has(cid) && (

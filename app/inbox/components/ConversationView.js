@@ -66,6 +66,8 @@ export default function ConversationView({
   embedded = false,
   onMarkUnread,
   onRenameContact,
+  onPromoteToLead = null,
+  promoteSaving = false,
   aiRepliesOn = true,
   aiToggleSaving = false,
   onToggleAiReplies = null,
@@ -209,7 +211,13 @@ export default function ConversationView({
             <div className="min-w-0">
               <h4 className="text-sm font-semibold text-foreground truncate">{getContactDisplayName(conversation.contact)}</h4>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">{isOther ? 'Not in the CRM' : conversation.contact?.type}</span>
+                <span className="text-xs text-muted-foreground">
+                  {isOther
+                    ? conversation.contact?.reason
+                      ? `Other · ${conversation.contact.reason}`
+                      : 'Not in the CRM'
+                    : conversation.contact?.type}
+                </span>
                 {contactPhone && (!isOther || conversation.contact?.name) && (
                   <>
                     <span className="text-xs text-muted-foreground">•</span>
@@ -234,6 +242,19 @@ export default function ConversationView({
                   aria-label="AI replies"
                 />
               </div>
+            )}
+            {isOther && onPromoteToLead && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={promoteSaving}
+                onClick={onPromoteToLead}
+                className="h-8 text-xs"
+                title="Move this contact into Leads so the agent and campaigns can run"
+              >
+                {promoteSaving ? 'Promoting…' : 'Make a lead'}
+              </Button>
             )}
             {canRename && onRenameContact && nameDraft === null && (
               <button

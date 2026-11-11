@@ -46,6 +46,7 @@ import CreateEnrollmentSheet from "@/components/enrollment/CreateEnrollmentSheet
 import { CreateEventPurchaseDialog } from "@/app/settings/setup/components/EventsPurchases";
 import CustomerMembershipsTab from "@/components/membership/CustomerMembershipsTab";
 import CustomerWalletTab from "@/components/wallet/CustomerWalletTab";
+import { useTerminalChargeSettled } from "@/lib/hooks/useTerminalChargeSettled";
 import CancelRefundDialog from "@/components/shared/CancelRefundDialog";
 import ConfirmStatusOverrideDialog from "@/components/customers/ConfirmStatusOverrideDialog";
 import CustomerStatusHistory from "@/components/customers/CustomerStatusHistory";
@@ -89,7 +90,8 @@ import { useCustomerLifecycleStatuses } from "@/lib/use-customer-lifecycle";
 import StatusColorBadge from "@/components/shared/StatusColorBadge";
 import { formatReasonLabel } from "@/lib/dynamic-list-normalize";
 import { extractLeadReasonsList } from "@/lib/workflow-normalize";
-import { buildPackageSessionOrder, resolveEventPayment } from "@/lib/event-payment";
+import { buildPackageSessionOrder, resolveEventPayment, membershipCoverageFor, buildPaymentContext, isPayableLesson } from "@/lib/event-payment";
+import { useUnpaidLessons } from "@/lib/hooks/useUnpaidLessons";
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 // Short name for an enrollment. A real package uses its template name; a
@@ -152,6 +154,10 @@ function paymentTypeBadge(type) {
   );
 }
 
+// Session counts can be fractional (e.g. 16.8) and float subtraction leaves noise
+// like 5.800000000000001 — round to 2dp so the UI never shows it.
+const roundSessions = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
 function SessionBar({ used, total }) {
   const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0;
   return (
@@ -163,7 +169,7 @@ function SessionBar({ used, total }) {
         />
       </div>
       <span className="text-[11px] text-muted-foreground shrink-0">
-        {total - used} left / {total}
+        {roundSessions(total - used)} left / {roundSessions(total)}
       </span>
     </div>
   );
@@ -1504,6 +1510,7 @@ function PaymentTimeline({ customerID, enrollmentID, payments: preloadedPayments
   const [loading, setLoading] = useState(false);
   const [syncingId, setSyncingId] = useState(null);
   const [bouncingId, setBouncingId] = useState(null);
+  const [cancellingId, setCancellingId] = useState(null);
   const toast = useToast();
   // A caller that already has the customer's full payment list (e.g. the
   // Events & Products tab) passes it pre-filtered — skips the redundant
@@ -1545,6 +1552,26 @@ function PaymentTimeline({ customerID, enrollmentID, payments: preloadedPayments
     } else {
       toast.success("Stripe still shows this as processing — try again shortly.");
     }
+    load(true);
+  }
+
+  // Customer changed their mind, or the wrong amount went to the card reader: cancels the
+  // pending reader charge (clears the reader, cancels at Stripe, package back to unpaid).
+  // If the customer had in fact already paid, the backend records it instead.
+  async function cancelPending(p) {
+    if (!window.confirm(`Cancel the pending $${Number(p.amount).toFixed(2)} card-reader charge? The package goes back to unpaid so you can send the right amount.`)) {
+      return;
+    }
+    setCancellingId(p._id);
+    const res = await api.post(`/api/payment/${p._id}/cancel-pending`);
+    setCancellingId(null);
+    if (!res.success) {
+      toast.error(res.error || "Couldn't cancel this charge.");
+      return;
+    }
+    if (res.data?.status === "completed") toast.success("The customer had already paid — payment recorded.");
+    else if (res.data?.status === "cancelled") toast.success("Charge cancelled.");
+    else toast.success("Stripe still shows this charge in progress — try again shortly.");
     load(true);
   }
 
@@ -1729,6 +1756,16 @@ function PaymentTimeline({ customerID, enrollmentID, payments: preloadedPayments
                                 className="text-[10px] font-medium text-muted-foreground hover:text-foreground underline underline-offset-2 disabled:opacity-50"
                               >
                                 {syncingId === p._id ? "Checking…" : "Check status"}
+                              </button>
+                            )}
+                            {p.status === "pending" && p.method === "terminal" && (
+                              <button
+                                type="button"
+                                disabled={cancellingId === p._id}
+                                onClick={() => cancelPending(p)}
+                                className="text-[10px] font-medium text-rose-600 hover:text-rose-700 underline underline-offset-2 disabled:opacity-50"
+                              >
+                                {cancellingId === p._id ? "Cancelling…" : "Cancel charge"}
                               </button>
                             )}
                             {p.method === "cheque" && p.checkStatus === "bounced" && (
@@ -2769,9 +2806,8 @@ function PackagesTab({ customerID, locationID }) {
                           svc.sessionsCompleted ?? 0,
                           (svc.sessionsUsed ?? 0) - sessSched,
                         );
-                        const sessRemaining = Math.max(
-                          0,
-                          sessTotal - sessUsed - sessSched,
+                        const sessRemaining = roundSessions(
+                          Math.max(0, sessTotal - sessUsed - sessSched),
                         );
                         const pps = Number(svc.pricePerSession) || 0;
                         const effectivePps =
@@ -2839,7 +2875,7 @@ function PackagesTab({ customerID, locationID }) {
                                   <p
                                     className={`text-[14px] font-bold ${cls ?? "text-foreground"}`}
                                   >
-                                    {value}
+                                    {roundSessions(value)}
                                   </p>
                                 </div>
                               ))}
@@ -4434,9 +4470,8 @@ function EnrollmentsTab({
                             svc.sessionsCompleted ?? 0,
                             (svc.sessionsUsed ?? 0) - sessSched,
                           );
-                          const sessRemaining = Math.max(
-                            0,
-                            sessTotal - sessUsed - sessSched,
+                          const sessRemaining = roundSessions(
+                            Math.max(0, sessTotal - sessUsed - sessSched),
                           );
                           const pps = isFree
                             ? 0
@@ -4605,22 +4640,22 @@ function EnrollmentsTab({
                                           </div>
                                         </div>
                                         <span className="text-[13px] font-semibold text-foreground text-right">
-                                          {sessTotal}
+                                          {roundSessions(sessTotal)}
                                         </span>
                                         <span
                                           className={`text-[13px] font-semibold text-right ${sessUsed > 0 ? "text-info" : "text-muted-foreground"}`}
                                         >
-                                          {sessUsed}
+                                          {roundSessions(sessUsed)}
                                         </span>
                                         <span
                                           className={`text-[13px] font-semibold text-right ${sessSched > 0 ? "text-violet-600" : "text-muted-foreground"}`}
                                         >
-                                          {sessSched}
+                                          {roundSessions(sessSched)}
                                         </span>
                                         <span
                                           className={`text-[13px] font-semibold text-right ${sessRemaining > 0 ? "text-foreground" : "text-muted-foreground"}`}
                                         >
-                                          {sessRemaining}
+                                          {roundSessions(sessRemaining)}
                                         </span>
                                         {/* Credit Balance is a SESSION COUNT —
                                             how many sessions the customer has
@@ -4797,16 +4832,16 @@ function EnrollmentsTab({
                                     Total
                                   </span>
                                   <span className="text-[13px] font-bold text-foreground text-right">
-                                    {totalEnrolled}
+                                    {roundSessions(totalEnrolled)}
                                   </span>
                                   <span className="text-[13px] font-bold text-foreground text-right">
-                                    {totalUsed}
+                                    {roundSessions(totalUsed)}
                                   </span>
                                   <span className="text-[13px] font-bold text-foreground text-right">
-                                    {totalSched}
+                                    {roundSessions(totalSched)}
                                   </span>
                                   <span className="text-[13px] font-bold text-foreground text-right">
-                                    {totalRemaining}
+                                    {roundSessions(totalRemaining)}
                                   </span>
                                   <span
                                     className={`text-[13px] font-bold text-right ${totalCreditSessions > 0 ? "text-success" : "text-muted-foreground"}`}
@@ -6163,6 +6198,7 @@ function PaymentsTab({ customerID }) {
   useEffect(() => {
     load(page);
   }, [load, page]);
+  useTerminalChargeSettled(() => load(page));
 
   const totalPages = Math.max(1, Math.ceil(total / LIMIT));
 
@@ -7275,20 +7311,13 @@ function LessonsTab({ customer }) {
     // Same coverage the calendar builds, so a lesson an active membership covers
     // reads Paid on both screens.
     api.get(`/api/customer-membership/customer/${customer._id}`).then((res) => {
-      const set = new Set();
-      (res.success && Array.isArray(res.data) ? res.data : []).forEach((m) => {
-        if (m.status !== "active") return;
-        (m.services || []).forEach((s) => {
-          if (s.serviceCode) set.add(`${customer._id}::${s.serviceCode}`);
-        });
-      });
-      setMembershipCoverageSet(set);
+      setMembershipCoverageSet(membershipCoverageFor(customer._id, res.success ? res.data : []));
     });
   }, [customer?._id]);
 
   // The calendar's own paid rule, judged on this student's charge.
   const paymentCtx = useMemo(
-    () => ({ ...buildPackageSessionOrder(events), membershipCoverageSet, customerID: custId }),
+    () => buildPaymentContext(events, membershipCoverageSet, custId),
     [events, membershipCoverageSet, custId],
   );
   const deriveEventPaid = (ev) => resolveEventPayment(ev, paymentCtx).paid;
@@ -7342,12 +7371,13 @@ function LessonsTab({ customer }) {
           (status === "cancelled" || isCancelledNoCharge)) ||
         (selectedStatuses.includes("no_show") && status === "no_show");
 
+      // Paid / Unpaid only mean something for a private or group lesson — a to-do never
+      // matches either filter.
       const matchesPayment =
         selectedPayments.length === 0 ||
-        (selectedPayments.includes("paid") && isPaid && !isCancelledNoCharge) ||
-        (selectedPayments.includes("unpaid") &&
-          !isPaid &&
-          !isCancelledNoCharge);
+        (isPayableLesson(ev) &&
+          ((selectedPayments.includes("paid") && isPaid && !isCancelledNoCharge) ||
+            (selectedPayments.includes("unpaid") && !isPaid && !isCancelledNoCharge)));
 
       return matchesStatus && matchesPayment;
     })
@@ -7466,6 +7496,8 @@ function LessonsTab({ customer }) {
             const isCancelledNoCharge =
               status === "cancelled_no_charge" ||
               status === "no_show_no_charge";
+            // Only a private or group lesson has a payment status; a to-do shows none.
+            const payable = isPayableLesson(ev);
             const paymentLabel = isCancelledNoCharge
               ? "No Charge"
               : isPaid
@@ -7536,11 +7568,13 @@ function LessonsTab({ customer }) {
                   >
                     {eventStatusLabel(status)}
                   </span>
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${paymentClass}`}
-                  >
-                    {paymentLabel}
-                  </span>
+                  {payable && (
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${paymentClass}`}
+                    >
+                      {paymentLabel}
+                    </span>
+                  )}
                 </div>
               </div>
             );
@@ -8080,8 +8114,11 @@ function ClickableRow({ onClick, className = "", children }) {
 
 // ─── Section index (Services / Billing / Records) ────────────────────────────
 
-function SectionIndex({ section, summary, onOpen }) {
+function SectionIndex({ section, summary, onOpen, customerID }) {
   const [expanded, setExpanded] = useState(null);
+  // Lessons nobody has paid for — surfaced on the Lessons row so a student who is
+  // behind can't go unnoticed until someone opens each lesson.
+  const unpaidLessons = useUnpaidLessons(section.views?.includes("lessons") ? customerID : null, summary.events);
 
   // Live counts so the index says something useful before you click into it.
   const stateFor = (viewId) => {
@@ -8153,6 +8190,7 @@ function SectionIndex({ section, summary, onOpen }) {
         return {
           value: next ? `Next ${formatStudioDate(next.startDateTime, null, { weekday: undefined, year: "numeric" })}` : "Nothing booked",
           hint: `${summary.events.length} in the last year`,
+          alert: unpaidLessons?.text || null,
         };
       }
       case "wallet":
@@ -8208,6 +8246,12 @@ function SectionIndex({ section, summary, onOpen }) {
                   <span className="block text-[11px] text-muted-foreground">
                     {meta.blurb}
                   </span>
+                  {state.alert && (
+                    <span className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-destructive">
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                      {state.alert}
+                    </span>
+                  )}
                 </span>
                 {state.value && (
                   <span className="hidden sm:block text-right shrink-0">
@@ -8954,6 +8998,7 @@ export default function CustomerDetailPage() {
   // Drill-in views change their own data (cancel, pay, enroll) — refresh the
   // shared summary on the way back so the indexes and Overview aren't stale.
   const { reload: reloadSummary } = summary;
+  useTerminalChargeSettled(reloadSummary);
   const prevViewRef = useRef(nav.view);
   useEffect(() => {
     if (prevViewRef.current && !nav.view) reloadSummary();
@@ -9134,7 +9179,7 @@ export default function CustomerDetailPage() {
         ) : section.id === "communication" ? (
           <CommunicationSection customer={customer} />
         ) : (
-          <SectionIndex section={section} summary={summary} onOpen={openView} />
+          <SectionIndex section={section} summary={summary} onOpen={openView} customerID={id} />
         )}
       </div>
     </MainLayout>

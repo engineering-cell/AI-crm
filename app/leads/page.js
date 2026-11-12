@@ -251,8 +251,9 @@ function LeadsPageInner() {
   }, [loadFilterOptions])
 
   useEffect(() => {
+    if (view === 'others') return
     loadLeads(currentPage, filters, pageSize)
-  }, [currentPage, filters, pageSize, loadLeads])
+  }, [currentPage, filters, pageSize, loadLeads, view])
 
   usePersistListState(LEADS_LIST_STATE_KEY, { currentPage, pageSize, filters })
 

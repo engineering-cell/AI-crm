@@ -1,3 +1,6 @@
+'use client'
+
+import { useState } from 'react'
 import { CalendarClock, Hash, Mail, Plus, Search, SlidersHorizontal, Users } from 'lucide-react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { cn, getInitials, getContactDisplayName } from '@/lib/utils'
@@ -113,10 +116,23 @@ export default function ContactList({
   onOpenFilters,
   onClearFilters,
 }) {
+  const [otherOrigin, setOtherOrigin] = useState('inbound')
   const filtered = canFilter && activeFilterCount > 0
   const showingScheduled = statusTab === 'Scheduled'
   const showType = contactFilter === 'Everyone'
+  const isOther = contactFilter === 'Other'
   const query = searchQuery.trim()
+  const originCounts = isOther
+    ? OTHER_ORIGIN_GROUPS.reduce((counts, { key }) => {
+        counts[key] = conversations.filter((c) => resolveOtherOrigin(c.contact) === key).length
+        return counts
+      }, {})
+    : {}
+  const listedConversations =
+    isOther && !showingScheduled
+      ? conversations.filter((c) => resolveOtherOrigin(c.contact) === otherOrigin)
+      : conversations
+  const activeOrigin = OTHER_ORIGIN_GROUPS.find((g) => g.key === otherOrigin)
 
   const tabCount = { Unread: unreadCount, Scheduled: scheduledItems.length }
 
@@ -241,6 +257,44 @@ export default function ContactList({
         })}
       </div>
 
+      {isOther && !showingScheduled && (
+        <div role="tablist" aria-label="Other conversations" className="flex items-center gap-5 border-b border-border px-4">
+          {OTHER_ORIGIN_GROUPS.map(({ key, label }) => {
+            const active = otherOrigin === key
+            const count = originCounts[key] || 0
+            return (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setOtherOrigin(key)}
+                className={cn(
+                  '-mb-px inline-flex items-center gap-1.5 border-b-2 py-2.5 text-sm transition-colors',
+                  active
+                    ? 'border-[color:var(--studio-primary)] font-medium text-[color:var(--studio-primary)]'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {label}
+                {count > 0 && (
+                  <span
+                    className={cn(
+                      'min-w-[1.25rem] rounded-full px-1.5 text-[11px] font-medium leading-5 tabular-nums',
+                      active
+                        ? 'bg-[color:var(--studio-primary-light)] text-[color:var(--studio-primary)]'
+                        : 'bg-muted text-muted-foreground',
+                    )}
+                  >
+                    {count}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto scrollbar-hide">
         {showingScheduled ? (
           scheduledLoading && scheduledItems.length === 0 ? (
@@ -293,7 +347,7 @@ export default function ContactList({
               })}
             </ul>
           )
-        ) : conversations.length === 0 ? (
+        ) : listedConversations.length === 0 ? (
           filtered && filterApplying ? (
             <EmptyState title="Applying filters…" body="Finding conversations that match." />
           ) : filtered ? (
@@ -303,109 +357,19 @@ export default function ContactList({
             />
           ) : query ? (
             <EmptyState title="No matches" body={`No conversations match “${query}”.`} />
+          ) : isOther && !showingScheduled && conversations.length > 0 ? (
+            <EmptyState
+              title={`No ${activeOrigin?.label?.toLowerCase() || 'other'} chats`}
+              body="Switch tabs to see the other Others conversations."
+            />
           ) : statusTab === 'Unread' ? (
             <EmptyState title="You're all caught up" body="New replies show up here until you open them." />
           ) : (
             <EmptyState title="No conversations yet" body="Start one with New, or message a group with Bulk." />
           )
-        ) : contactFilter === 'Other' ? (
-          <div>
-            {OTHER_ORIGIN_GROUPS.map(({ key, label }) => {
-              const group = conversations.filter(
-                (c) => resolveOtherOrigin(c.contact) === key,
-              )
-              if (!group.length) return null
-              return (
-                <div key={key}>
-                  <div className="sticky top-0 z-[1] border-b border-border/60 bg-card/95 px-4 py-1.5 backdrop-blur-sm">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      {label}
-                      <span className="ml-1.5 font-medium tabular-nums text-muted-foreground/80">
-                        {group.length}
-                      </span>
-                    </p>
-                  </div>
-                  <ul>
-                    {group.map((conv) => {
-                      const active = selectedConversation === conv.id
-                      const unread = isUnread(conv)
-                      return (
-                        <li key={conv.id}>
-                          <button
-                            type="button"
-                            onClick={() => onSelectConversation(conv.id)}
-                            className={cn(
-                              'relative flex w-full items-center gap-3 border-b border-border/50 px-4 py-3 text-left transition-colors',
-                              active ? 'bg-[color:var(--studio-primary-light)]' : 'hover:bg-muted/60',
-                            )}
-                          >
-                            {active && (
-                              <span
-                                className="absolute inset-y-0 left-0 w-[3px] bg-[color:var(--studio-primary)]"
-                                aria-hidden
-                              />
-                            )}
-                            <ContactAvatar contact={conv.contact} />
-                            <span className="min-w-0 flex-1">
-                              <span className="flex items-baseline justify-between gap-2">
-                                <span
-                                  className={cn(
-                                    'truncate text-sm',
-                                    unread ? 'font-semibold' : 'font-medium',
-                                    active
-                                      ? 'text-[color:var(--studio-primary)]'
-                                      : 'text-foreground',
-                                  )}
-                                >
-                                  {getContactDisplayName(conv.contact)}
-                                </span>
-                                <span
-                                  className={cn(
-                                    'shrink-0 text-[11px] tabular-nums',
-                                    unread
-                                      ? 'font-medium text-[color:var(--studio-primary)]'
-                                      : 'text-muted-foreground',
-                                  )}
-                                >
-                                  {formatListTime(conv.timestamp)}
-                                </span>
-                              </span>
-                              <span className="mt-0.5 flex items-center gap-2">
-                                <span
-                                  className={cn(
-                                    'flex min-w-0 flex-1 items-center gap-1 truncate text-[13px]',
-                                    unread ? 'text-foreground' : 'text-muted-foreground',
-                                  )}
-                                >
-                                  {conv.channel === 'Email' && (
-                                    <Mail
-                                      className="h-3 w-3 shrink-0 opacity-70"
-                                      aria-label="Email"
-                                    />
-                                  )}
-                                  <span className="truncate">
-                                    {conv.lastMessage || 'No messages yet'}
-                                  </span>
-                                </span>
-                                {unread && (
-                                  <span className="h-2 w-2 shrink-0 rounded-full bg-[color:var(--studio-primary)]">
-                                    <span className="sr-only">Unread</span>
-                                  </span>
-                                )}
-                              </span>
-                            </span>
-                          </button>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                </div>
-              )
-            })}
-          </div>
         ) : (
           <ul>
-            {conversations.map((conv) => {
+            {listedConversations.map((conv) => {
               const active = selectedConversation === conv.id
               const unread = isUnread(conv)
               return (

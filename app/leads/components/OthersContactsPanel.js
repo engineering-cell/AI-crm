@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { MessageSquare, UserPlus, ExternalLink, Plus } from 'lucide-react'
 import api from '@/lib/api'
@@ -24,6 +24,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
+import { RowsPerPage } from '@/components/shared/RowsPerPage'
 import { cn, formatDateTime } from '@/lib/utils'
 import { normalizePhoneE164 } from '@/lib/inbox-messaging'
 import { hasPermission } from '@/lib/permissions'
@@ -46,47 +47,66 @@ export default function OthersContactsPanel() {
   const [contacts, setContacts] = useState([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const [total, setTotal] = useState(0)
   const [promotingId, setPromotingId] = useState(null)
   const [textOpen, setTextOpen] = useState(false)
   const [textPhone, setTextPhone] = useState('')
   const [textBody, setTextBody] = useState('')
   const [textSending, setTextSending] = useState(false)
+  const appliedQueryRef = useRef('')
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const next = query.trim()
+      if (appliedQueryRef.current === next) return
+      appliedQueryRef.current = next
+      setDebouncedQuery(next)
+      setPage(1)
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [query])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await api.get('/api/inbox/contacts')
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(pageSize),
+      })
+      if (debouncedQuery) params.set('q', debouncedQuery)
+      const res = await api.get(`/api/inbox/contacts?${params.toString()}`)
       const list = Array.isArray(res?.data?.contacts)
         ? res.data.contacts
         : Array.isArray(res?.data)
           ? res.data
           : []
+      const nextTotal = Number(res?.pagination?.total ?? res?.data?.total ?? list.length) || 0
+      if (list.length === 0 && page > 1 && nextTotal > 0) {
+        setPage((current) => Math.max(1, current - 1))
+        return
+      }
       setContacts(list)
+      setTotal(nextTotal)
     } catch (err) {
       console.error(err)
       toast.error('Could not load Others', {
         description: err?.message || 'Try again',
       })
       setContacts([])
+      setTotal(0)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [page, pageSize, debouncedQuery])
 
   useEffect(() => {
     load()
   }, [load])
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return contacts
-    return contacts.filter((c) => {
-      const hay = [c.name, c.phoneNumber, c.email, c.reason, c.originLabel, c.origin]
-        .map((v) => String(v || '').toLowerCase())
-        .join(' ')
-      return hay.includes(q)
-    })
-  }, [contacts, query])
+  const totalPages = Math.max(1, Math.ceil((total || 0) / pageSize) || 1)
 
   const openInboxThread = (contact) => {
     const phone = contact?.phoneNumber
@@ -189,11 +209,15 @@ export default function OthersContactsPanel() {
         <div className="flex justify-center py-16">
           <LoadingSpinner />
         </div>
-      ) : filtered.length === 0 ? (
+      ) : contacts.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border px-6 py-14 text-center">
-          <p className="text-sm font-medium text-foreground">No Others yet</p>
+          <p className="text-sm font-medium text-foreground">
+            {debouncedQuery ? 'No matches' : 'No Others yet'}
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Silent calls, short greetings, and staff-started numbers show up here.
+            {debouncedQuery
+              ? 'Nothing on this list matches that search.'
+              : 'Silent calls, short greetings, and staff-started numbers show up here.'}
           </p>
         </div>
       ) : (
@@ -210,7 +234,7 @@ export default function OthersContactsPanel() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((contact) => {
+              {contacts.map((contact) => {
                 const origin = contact.origin || 'outbound'
                 const id = String(contact._id)
                 return (
@@ -287,6 +311,37 @@ export default function OthersContactsPanel() {
               })}
             </TableBody>
           </Table>
+          <div className="flex items-center justify-between border-t border-border px-4 py-3">
+            <RowsPerPage
+              value={pageSize}
+              onChange={(n) => {
+                setPageSize(n)
+                setPage(1)
+              }}
+              disabled={loading}
+            />
+            <span className="text-sm text-muted-foreground">
+              Page {page} of {totalPages}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={page === 1 || loading}
+                className="inline-flex h-8 items-center rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                disabled={page === totalPages || loading}
+                className="inline-flex h-8 items-center rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

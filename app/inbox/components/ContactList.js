@@ -9,9 +9,23 @@ const GROUP_SUBTITLE = {
   Customers: 'Customers',
   Leads: 'Leads',
   Teachers: 'Teachers',
+  Other: 'Other',
 }
 
 const STATUS_TABS = ['All', 'Unread', 'Scheduled']
+
+const OTHER_ORIGIN_GROUPS = [
+  { key: 'inbound', label: 'Inbound' },
+  { key: 'outbound', label: 'Outbound' },
+  { key: 'pending', label: 'Waiting' },
+]
+
+function resolveOtherOrigin(contact) {
+  const raw = String(contact?.origin || '').toLowerCase()
+  if (raw === 'inbound' || raw === 'outbound' || raw === 'pending') return raw
+  if (contact?.reason) return 'inbound'
+  return 'outbound'
+}
 
 /** Compact list time: today → 5:04 PM, this week → Tue, older → Oct 8. */
 function formatListTime(value) {
@@ -294,6 +308,101 @@ export default function ContactList({
           ) : (
             <EmptyState title="No conversations yet" body="Start one with New, or message a group with Bulk." />
           )
+        ) : contactFilter === 'Other' ? (
+          <div>
+            {OTHER_ORIGIN_GROUPS.map(({ key, label }) => {
+              const group = conversations.filter(
+                (c) => resolveOtherOrigin(c.contact) === key,
+              )
+              if (!group.length) return null
+              return (
+                <div key={key}>
+                  <div className="sticky top-0 z-[1] border-b border-border/60 bg-card/95 px-4 py-1.5 backdrop-blur-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {label}
+                      <span className="ml-1.5 font-medium tabular-nums text-muted-foreground/80">
+                        {group.length}
+                      </span>
+                    </p>
+                  </div>
+                  <ul>
+                    {group.map((conv) => {
+                      const active = selectedConversation === conv.id
+                      const unread = isUnread(conv)
+                      return (
+                        <li key={conv.id}>
+                          <button
+                            type="button"
+                            onClick={() => onSelectConversation(conv.id)}
+                            className={cn(
+                              'relative flex w-full items-center gap-3 border-b border-border/50 px-4 py-3 text-left transition-colors',
+                              active ? 'bg-[color:var(--studio-primary-light)]' : 'hover:bg-muted/60',
+                            )}
+                          >
+                            {active && (
+                              <span
+                                className="absolute inset-y-0 left-0 w-[3px] bg-[color:var(--studio-primary)]"
+                                aria-hidden
+                              />
+                            )}
+                            <ContactAvatar contact={conv.contact} />
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-baseline justify-between gap-2">
+                                <span
+                                  className={cn(
+                                    'truncate text-sm',
+                                    unread ? 'font-semibold' : 'font-medium',
+                                    active
+                                      ? 'text-[color:var(--studio-primary)]'
+                                      : 'text-foreground',
+                                  )}
+                                >
+                                  {getContactDisplayName(conv.contact)}
+                                </span>
+                                <span
+                                  className={cn(
+                                    'shrink-0 text-[11px] tabular-nums',
+                                    unread
+                                      ? 'font-medium text-[color:var(--studio-primary)]'
+                                      : 'text-muted-foreground',
+                                  )}
+                                >
+                                  {formatListTime(conv.timestamp)}
+                                </span>
+                              </span>
+                              <span className="mt-0.5 flex items-center gap-2">
+                                <span
+                                  className={cn(
+                                    'flex min-w-0 flex-1 items-center gap-1 truncate text-[13px]',
+                                    unread ? 'text-foreground' : 'text-muted-foreground',
+                                  )}
+                                >
+                                  {conv.channel === 'Email' && (
+                                    <Mail
+                                      className="h-3 w-3 shrink-0 opacity-70"
+                                      aria-label="Email"
+                                    />
+                                  )}
+                                  <span className="truncate">
+                                    {conv.lastMessage || 'No messages yet'}
+                                  </span>
+                                </span>
+                                {unread && (
+                                  <span className="h-2 w-2 shrink-0 rounded-full bg-[color:var(--studio-primary)]">
+                                    <span className="sr-only">Unread</span>
+                                  </span>
+                                )}
+                              </span>
+                            </span>
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              )
+            })}
+          </div>
         ) : (
           <ul>
             {conversations.map((conv) => {

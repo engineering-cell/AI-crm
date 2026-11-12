@@ -22,6 +22,7 @@ import {
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
 import LeadsDialog from './components/LeadsDialog'
+import OthersContactsPanel from './components/OthersContactsPanel'
 import BulkCreateLeadsDialog from './components/BulkCreateLeadsDialog'
 import ImportExportCsv from '@/components/shared/ImportExportCsv'
 import LeadsQuickBar from '@/components/leads/LeadsQuickBar'
@@ -109,7 +110,8 @@ function toRecipientLead(lead) {
 function LeadsPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const view = searchParams.get('view') === 'lists' ? 'lists' : 'all'
+  const viewParam = searchParams.get('view')
+  const view = viewParam === 'lists' ? 'lists' : viewParam === 'others' ? 'others' : 'all'
   const canWriteLeads = hasPermission('leads', 'manage', 'write')
   const canDeleteLeads = hasPermission('leads', 'manage', 'delete')
   const { stages: stageOptions } = useLeadStages()
@@ -147,6 +149,7 @@ function LeadsPageInner() {
   const setView = (nextView) => {
     const params = new URLSearchParams(searchParams.toString())
     if (nextView === 'lists') params.set('view', 'lists')
+    else if (nextView === 'others') params.set('view', 'others')
     else params.delete('view')
     const qs = params.toString()
     router.replace(`/leads${qs ? `?${qs}` : ''}`, { scroll: false })
@@ -283,7 +286,7 @@ function LeadsPageInner() {
     setListDialogOpen(true)
   }
 
-  if (initialLoad && view !== 'lists') {
+  if (initialLoad && view !== 'lists' && view !== 'others') {
     return (
       <MainLayout>
         <div className="flex items-center justify-center h-[calc(100vh-8rem)]">
@@ -603,11 +606,28 @@ function LeadsPageInner() {
                 <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-[var(--studio-primary)]" />
               ) : null}
             </button>
+            <button
+              type="button"
+              onClick={() => setView('others')}
+              className={cn(
+                'relative pb-2.5 text-[13px] font-medium transition-colors',
+                view === 'others'
+                  ? 'text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Others
+              {view === 'others' ? (
+                <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-[var(--studio-primary)]" />
+              ) : null}
+            </button>
           </div>
         </div>
 
         {view === 'lists' ? (
           <SavedListsPanel entityType="lead" refreshKey={savedListsRefreshKey} />
+        ) : view === 'others' ? (
+          <OthersContactsPanel />
         ) : (
           <>
         <LeadsQuickBar

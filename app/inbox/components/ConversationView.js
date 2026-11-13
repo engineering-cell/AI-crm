@@ -215,7 +215,11 @@ export default function ConversationView({
                   {isOther
                     ? conversation.contact?.reason
                       ? `Other · ${conversation.contact.reason}`
-                      : 'Not in the CRM'
+                      : String(conversation.contact?.origin || '').toLowerCase() === 'pending'
+                        ? 'Waiting for intent'
+                        : String(conversation.contact?.origin || '').toLowerCase() === 'outbound'
+                          ? 'Outbound · Not in the CRM'
+                          : 'Not in the CRM'
                     : conversation.contact?.type}
                 </span>
                 {contactPhone && (!isOther || conversation.contact?.name) && (

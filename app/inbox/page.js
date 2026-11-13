@@ -436,6 +436,7 @@ function InboxPageContent() {
             leadSourceID: conv.leadSourceID || null,
             reason: conv.reason || '',
             evidence: conv.evidence || '',
+            origin: conv.origin || '',
           },
           lastMessage: conv.lastMessage,
           timestamp: conv.lastMessageAt,
@@ -546,6 +547,12 @@ function InboxPageContent() {
   useEffect(() => {
     setContactFilter(INBOX_FILTER_MAP[urlFilter] ?? 'Customers')
   }, [urlFilter])
+
+  // Leads → Others "open in inbox" passes ?q=phone
+  const urlQuery = searchParams?.get('q') || ''
+  useEffect(() => {
+    if (urlQuery) setSearchQuery(urlQuery)
+  }, [urlQuery])
 
   // Location is enforced by the API via x-location-id (branch switcher reloads the page).
   const filteredConversations = useMemo(() => conversations, [conversations])

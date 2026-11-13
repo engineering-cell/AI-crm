@@ -121,14 +121,20 @@ export default function EnrollmentServicesTable({
           lessons: events.map((e) => ({ id: e._id, startDateTime: e.startDateTime, status: e.status })),
         });
 
+    // Signed balance: money left after every completed and scheduled lesson. It goes NEGATIVE
+    // when lessons are booked beyond what has been paid for (-4 = four lessons still to pay
+    // for, -$580 = what covers them), so staff can see it without doing the math.
+    const signedDollars = coverage
+      ? coverage.leftover - coverage.completed.gap - coverage.scheduled.gap
+      : 0;
     const creditLessons = isFree
       ? 0
       : price <= 0
         ? sessRemaining
         : fullyPaid
           ? sessRemaining
-          : coverage.leftover / price;
-    const creditDollars = isFree ? 0 : fullyPaid ? sessRemaining * price : (coverage?.leftover ?? 0);
+          : signedDollars / price;
+    const creditDollars = isFree ? 0 : fullyPaid ? sessRemaining * price : signedDollars;
 
     return {
       svc, i, isFree, sessTotal, sessUsed, sessSched, sessRemaining, price,
@@ -160,7 +166,7 @@ export default function EnrollmentServicesTable({
           ))}
           <span className="flex items-center justify-start gap-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
             Paid credit
-            <span title="Paid lesson credit left after completed and scheduled lessons." className="cursor-help normal-case">
+            <span title="Paid lesson credit left after completed and scheduled lessons. A negative number means lessons are booked beyond what has been paid for." className="cursor-help normal-case">
               <Info className="h-3 w-3" aria-label="About paid credit" />
             </span>
           </span>
@@ -216,10 +222,12 @@ export default function EnrollmentServicesTable({
                     <span className="text-[13px] leading-5 font-semibold text-muted-foreground">—</span>
                   ) : (
                     <>
-                      <span className={`block text-[13px] leading-5 font-semibold ${r.creditLessons > 0 ? "text-success" : "text-muted-foreground"}`}>
+                      <span className={`block text-[13px] leading-5 font-semibold ${r.creditLessons > 0.005 ? "text-success" : r.creditLessons < -0.005 ? "text-destructive" : "text-muted-foreground"}`}>
                         {formatLessonCount(r.creditLessons)} {Number(formatLessonCount(r.creditLessons)) === 1 ? "lesson" : "lessons"}
                       </span>
-                      <div className="text-[11px] text-muted-foreground">{money(r.creditDollars)} available</div>
+                      <div className={`text-[11px] ${r.creditDollars < -0.005 ? "text-destructive" : "text-muted-foreground"}`}>
+                        {r.creditDollars < -0.005 ? `${money(-r.creditDollars)} short` : `${money(r.creditDollars)} available`}
+                      </div>
                     </>
                   )}
                 </div>

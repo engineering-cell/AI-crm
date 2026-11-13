@@ -485,11 +485,16 @@ function GroupStudentRoster({
       const pkgServices = enrollment.package?.services ?? [];
       const isActive =
         enrollment.status === "active" && enrollment.package?.status === "active";
+      // A student can be added only if they hold credit for THIS class's service. Matching
+      // any group-type service let someone with only Practice Party credit (a separate
+      // group service) appear for a Group Class they have none left for; their booking
+      // would then be charged against the class's own service and have no credit.
+      // Only an event with no service of its own falls back to "any group service".
+      const coversThisEvent = (s) =>
+        serviceCode ? s.serviceCode === serviceCode : groupCodes.has(s.serviceCode);
       if (
         isActive &&
-        pkgServices.some(
-          (s) => groupCodes.has(s.serviceCode) && (s.sessionsRemaining ?? 0) > 0,
-        )
+        pkgServices.some((s) => coversThisEvent(s) && (s.sessionsRemaining ?? 0) > 0)
       ) {
         const cid = String(
           enrollment.customerID?._id ?? enrollment.customerID ?? "",

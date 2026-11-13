@@ -628,6 +628,8 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated, initialCus
   const [saving, setSaving] = useState(false)
   const todayISO = todayDateInput
   const [purchaseDate, setPurchaseDate] = useState(todayISO())
+  // When the event / competition ends. After it passes the purchase completes on its own.
+  const [expiryDate, setExpiryDate] = useState('')
 
   // Billing
   const [billingType, setBillingType] = useState('one_time') // one_time | payment_plan | flexible
@@ -792,6 +794,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated, initialCus
         sourceTemplateID: templateID || undefined,
         name: name.trim(),
         purchaseDate: purchaseDate ? dateInputToISO(purchaseDate) : undefined,
+        expiryDate: expiryDate || undefined,
         lineItems,
         saveAsTemplate,
         templateName: name.trim(),
@@ -957,13 +960,19 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated, initialCus
                 <Input id="cep-name" placeholder="e.g. AODC New Jersey 2026" value={name} onChange={(e) => setName(e.target.value)} />
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="cep-purchase-date">Purchase date</Label>
-                <Input id="cep-purchase-date" type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="cep-purchase-date">Purchase date</Label>
+                  <Input id="cep-purchase-date" type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="cep-expiry-date">Expiry date (event end)</Label>
+                  <Input id="cep-expiry-date" type="date" value={expiryDate} min={purchaseDate || undefined} onChange={(e) => setExpiryDate(e.target.value)} />
+                </div>
               </div>
 
               <p className="text-xs text-muted-foreground -mb-2">
-                Give a product an event date to auto-check it once that time passes; leave it blank to check it off manually from the customer profile.
+                Set the day the event or competition ends: once it passes, every product is checked off and the purchase moves to Completed automatically. You can also change it later from the customer profile.
               </p>
 
               <LineItemsEditor

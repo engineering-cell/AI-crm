@@ -81,6 +81,7 @@ import { getStudioTimezone } from "@/lib/studioTimezone";
 import { fetchWalletBalance } from "@/lib/wallet";
 import { useToast } from "@/components/ui/toast";
 import { getInitials, formatDate, formatDateTime, roundSessions } from "@/lib/utils";
+import EnrollmentServicesTable from "./EnrollmentServicesTable";
 import {
   customerLifecycleColor,
   customerLifecycleLabel,
@@ -4393,468 +4394,18 @@ function EnrollmentsTab({
                         </div>
                       )}
 
-                    {/* Services */}
-                    {services.length > 0 &&
-                      (() => {
-                        let totalEnrolled = 0,
-                          totalUsed = 0,
-                          totalSched = 0,
-                          totalRemaining = 0,
-                          totalCreditSessions = 0,
-                          totalCredit = 0,
-                          totalServicePrice = 0;
-                        // Historically this proration only ran for
-                        // "deferred" billing types (flexible/payment_plan/
-                        // pay_per_session); "one_time" (including every
-                        // migration-imported package, whose billingType
-                        // defaults to "one_time" when the sheet leaves it
-                        // blank) always showed 100% of remaining sessions as
-                        // credit regardless of how much was actually
-                        // collected — an unpaid balance displayed as
-                        // spendable credit. The credit-vs-owed split must be
-                        // based on the package's actual paid ratio
-                        // (amountCollected / contractedValue) for every
-                        // billing type, not gated on billingType at all.
-                        const isDeferred =
-                          cp.billingType === "flexible" ||
-                          cp.billingType === "payment_plan" ||
-                          cp.billingType === "pay_per_session";
-                        // A service is "free" when it's marked non-chargeable or
-                        // fully discounted (finalAmount 0). Free services only track
-                        // sessions — no credit balance, no price.
-                        const isFreeService = (sv) =>
-                          sv.isChargeable === false ||
-                          Number(sv.finalAmount || 0) <= 0;
-                        // Net (post-discount) price for a service — what was
-                        // actually charged, so proration below allocates the
-                        // pooled `amountCollected` by what each service costs
-                        // net of discount, not its undiscounted list price.
-                        // Falls back to list price when finalAmount isn't set
-                        // (legacy/migrated enrollments).
-                        const svcNetPrice = (sv) => {
-                          if (isFreeService(sv)) return 0;
-                          const listPrice =
-                            (sv.sessionsTotal ?? 0) *
-                            Number(sv.pricePerSession || 0);
-                          return Number(sv.finalAmount) > 0
-                            ? Number(sv.finalAmount)
-                            : listPrice;
-                        };
-                        // Sum of all chargeable services' net prices
-                        // (denominator for proportion) — matches the
-                        // per-service net price used for the numerator below,
-                        // so proration and the sessions conversion (which
-                        // uses discount-adjusted effectivePps) stay on the
-                        // same discounted basis instead of mixing list-price
-                        // weights with discounted per-session divisors.
-                        const chargeableSvcPriceTotal = services.reduce(
-                          (s, sv) => s + svcNetPrice(sv),
-                          0,
-                        );
-                        const rows = services.map((svc, i) => {
-                          const isFree = isFreeService(svc);
-                          const sessTotal = svc.sessionsTotal ?? 0;
-                          const sessSched = svc.sessionsScheduled ?? 0;
-                          // See the same fix's comment above (list view) —
-                          // `??` alone hides an imported Sessions Taken count
-                          // whenever there's no real charge history, but
-                          // sessionsUsed already counts still-scheduled
-                          // sessions too, so subtract sessSched before taking
-                          // the floor — otherwise a normal (non-imported)
-                          // package double-counts its live-scheduled sessions
-                          // as both "completed" and "scheduled".
-                          const sessUsed = Math.max(
-                            svc.sessionsCompleted ?? 0,
-                            (svc.sessionsUsed ?? 0) - sessSched,
-                          );
-                          const sessRemaining = roundSessions(
-                            Math.max(0, sessTotal - sessUsed - sessSched),
-                          );
-                          const pps = isFree
-                            ? 0
-                            : Number(svc.pricePerSession) || 0;
-                          const effectivePps = isFree
-                            ? 0
-                            : sessTotal > 0 && svc.finalAmount > 0
-                              ? Number(svc.finalAmount) / sessTotal
-                              : pps;
-                          const svcTotal = isFree ? 0 : sessTotal * pps;
-                          // For deferred billing, credit = paid amount ÷ price-per-session (decimal)
-                          const svcCreditSessions = (() => {
-                            if (isFree) return 0;
-                            if (pps <= 0) return sessRemaining;
-                            // Fully collected (paid ratio >= 100%, e.g. the
-                            // common "one_time" fully-paid case) — every
-                            // remaining session is credit, no proration
-                            // needed. Only an *actual* unpaid/partial
-                            // balance (any billing type) prorates below.
-                            const totalContracted = Number(cp.totalPaid ?? cp.contractedValue ?? 0);
-                            if (totalContracted > 0 && Number(cp.amountCollected ?? 0) >= totalContracted) {
-                              return sessRemaining;
-                            }
-                            if (!isDeferred && totalContracted <= 0) return sessRemaining;
-                            // Proportion by this service's share of total
-                            // chargeable price, net of discount (same basis as
-                            // chargeableSvcPriceTotal above).
-                            const svcShare =
-                              chargeableSvcPriceTotal > 0
-                                ? svcNetPrice(svc) / chargeableSvcPriceTotal
-                                : 1;
-                            const svcAmountPaid =
-                              (cp.amountCollected ?? 0) * svcShare;
-                            const paidSessions = svcAmountPaid / effectivePps;
-                            // Subtract scheduled sessions so credit reduces when booked
-                            return Math.max(
-                              0,
-                              paidSessions - sessUsed - sessSched,
-                            );
-                          })();
-                          // Valued at effectivePps (net of discount) rather
-                          // than list-price pps, so a discounted package's
-                          // dollar credit balance reflects what was actually
-                          // charged per session, not the pre-discount rate.
-                          const svcCredit = svcCreditSessions * effectivePps;
-                          totalEnrolled += sessTotal;
-                          totalUsed += sessUsed;
-                          totalSched += sessSched;
-                          // Matches the per-row Remaining cell (always
-                          // sessRemaining, regardless of billing type) —
-                          // Credit Balance is tracked separately below since
-                          // the two columns mean different things for
-                          // deferred/flexible billing.
-                          totalRemaining += sessRemaining;
-                          totalCreditSessions += svcCreditSessions;
-                          totalCredit += svcCredit;
-                          totalServicePrice += svcTotal;
-                          return {
-                            svc,
-                            i,
-                            isFree,
-                            sessTotal,
-                            sessUsed,
-                            sessSched,
-                            sessRemaining,
-                            svcCreditSessions,
-                            svcCredit,
-                            svcTotal,
-                            effectivePps,
-                          };
-                        });
-                        return (
-                          <div className="mt-5 border-t border-border pt-5">
-                            <p className="text-[12px] font-bold text-foreground uppercase tracking-widest mb-3">
-                              Services
-                            </p>
-                            <div className="rounded-lg border border-border overflow-hidden">
-                              {/* Column headers */}
-                              <div
-                                className="grid sticky top-0 z-10 bg-muted/50 border-b-2 border-border px-3 py-2.5"
-                                style={{
-                                  gridTemplateColumns:
-                                    "minmax(0,1fr) 80px 80px 80px 80px 80px",
-                                }}
-                              >
-                                <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                                  Service
-                                </span>
-                                {[
-                                  "Enrolled",
-                                  "Completed",
-                                  "Scheduled",
-                                  "Remaining",
-                                  "Credit Balance",
-                                ].map((h) => (
-                                  <span
-                                    key={h}
-                                    className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider text-right"
-                                  >
-                                    {h}
-                                  </span>
-                                ))}
-                              </div>
-                              {/* Service rows */}
-                              {rows.map(
-                                ({
-                                  svc,
-                                  i,
-                                  isFree,
-                                  sessTotal,
-                                  sessUsed,
-                                  sessSched,
-                                  sessRemaining,
-                                  svcCreditSessions,
-                                  svcCredit,
-                                  svcTotal,
-                                  effectivePps,
-                                }) => {
-                                  const expandKey = `${enr._id}-${i}`;
-                                  const isExpanded =
-                                    expandedServices.has(expandKey);
-                                  return (
-                                    <div
-                                      key={i}
-                                      className={
-                                        i > 0 ? "border-t border-border" : ""
-                                      }
-                                    >
-                                      <div
-                                        className="grid items-center px-3 py-3 cursor-pointer hover:bg-muted/20 transition-colors"
-                                        style={{
-                                          gridTemplateColumns:
-                                            "minmax(0,1fr) 80px 80px 80px 80px 80px",
-                                        }}
-                                        onClick={() => toggleService(expandKey)}
-                                      >
-                                        <div>
-                                          <div className="flex items-center gap-2">
-                                            <ChevronDown
-                                              className={`h-3 w-3 text-muted-foreground shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                                            />
-                                            {svc.color && (
-                                              <span
-                                                className="h-2.5 w-2.5 rounded-full shrink-0 border border-black/10"
-                                                style={{
-                                                  backgroundColor: svc.color,
-                                                }}
-                                              />
-                                            )}
-                                            <span className="text-[12px] font-medium text-foreground">
-                                              {svc.serviceName}
-                                            </span>
-                                            {isFree && (
-                                              <span className="shrink-0 inline-flex items-center rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-semibold text-success">
-                                                {svc.isChargeable === false
-                                                  ? "Non-chargeable"
-                                                  : "Free"}
-                                              </span>
-                                            )}
-                                          </div>
-                                          <div className="mt-1.5 pl-[28px]">
-                                            <SessionBar
-                                              used={sessUsed + sessSched}
-                                              total={sessTotal}
-                                            />
-                                          </div>
-                                        </div>
-                                        <span className="text-[13px] font-semibold text-foreground text-right">
-                                          {roundSessions(sessTotal)}
-                                        </span>
-                                        <span
-                                          className={`text-[13px] font-semibold text-right ${sessUsed > 0 ? "text-info" : "text-muted-foreground"}`}
-                                        >
-                                          {roundSessions(sessUsed)}
-                                        </span>
-                                        <span
-                                          className={`text-[13px] font-semibold text-right ${sessSched > 0 ? "text-violet-600" : "text-muted-foreground"}`}
-                                        >
-                                          {roundSessions(sessSched)}
-                                        </span>
-                                        <span
-                                          className={`text-[13px] font-semibold text-right ${sessRemaining > 0 ? "text-foreground" : "text-muted-foreground"}`}
-                                        >
-                                          {roundSessions(sessRemaining)}
-                                        </span>
-                                        {/* Credit Balance is a SESSION COUNT —
-                                            how many sessions the customer has
-                                            effectively paid for and can still
-                                            schedule (svcCreditSessions), not a
-                                            dollar figure (svcCredit is the $
-                                            equivalent, shown on hover/expanded
-                                            detail elsewhere, not here). The
-                                            actual bug was that this only got
-                                            rounded when billing was
-                                            "deferred" — a partially-paid
-                                            one_time package rendered the raw
-                                            float unrounded (e.g.
-                                            "2.9803921568"). Round unconditionally instead. */}
-                                        <span
-                                          className={`text-[13px] font-semibold text-right ${svcCreditSessions > 0 ? "text-success" : "text-muted-foreground"}`}
-                                          title={`$${svcCredit.toFixed(2)}`}
-                                        >
-                                          {isFree
-                                            ? "—"
-                                            : svcCreditSessions
-                                                .toFixed(2)
-                                                .replace(/\.00$/, "")
-                                                .replace(/(\.\d)0$/, "$1")}
-                                        </span>
-                                      </div>
-                                      {isExpanded && (
-                                        <div className="border-t border-border/50 bg-muted/10 px-4 py-4 pl-10">
-                                          {(() => {
-                                            const svcEvents = calendarEvents
-                                              .filter((e) => {
-                                                const cs = e.calendarServiceID;
-                                                if (!cs) return false;
-                                                const matchesService =
-                                                  svc.serviceCode
-                                                    ? cs.serviceCode ===
-                                                      svc.serviceCode
-                                                    : cs.serviceName ===
-                                                      svc.serviceName;
-                                                if (!matchesService)
-                                                  return false;
-                                                const charge = (
-                                                  e.charges || []
-                                                ).find(
-                                                  (c) =>
-                                                    String(c.customerID) ===
-                                                      String(customerID) &&
-                                                    c.method === "package",
-                                                );
-                                                if (!charge) return false;
-                                                const chargedEnrId =
-                                                  charge.enrollmentID?._id ??
-                                                  charge.enrollmentID;
-                                                return (
-                                                  String(chargedEnrId) ===
-                                                  String(enr._id)
-                                                );
-                                              })
-                                              .sort(
-                                                (a, b) =>
-                                                  new Date(b.startDateTime) -
-                                                  new Date(a.startDateTime),
-                                              );
-                                            // Completed count can exceed the lessons listed: a
-                                            // migration's "Sessions Taken" has no dated lesson
-                                            // behind it. Show the gap instead of leaving it unexplained.
-                                            const untracked = Math.max(
-                                              0,
-                                              sessUsed -
-                                                svcEvents.filter(
-                                                  (e) =>
-                                                    e.status === "completed" ||
-                                                    e.status === "no_show_charged",
-                                                ).length,
-                                            );
-                                            if (svcEvents.length === 0 && untracked === 0)
-                                              return (
-                                                <p className="text-[12px] text-muted-foreground px-1 py-2">
-                                                  No lessons scheduled yet for
-                                                  this service.
-                                                </p>
-                                              );
-                                            return (
-                                              <div className="rounded-lg border border-border overflow-hidden">
-                                                <div className="grid grid-cols-[1fr_140px_150px] gap-2 bg-muted/50 border-b border-border px-3 py-2">
-                                                  {[
-                                                    "Date & Time",
-                                                    "Teacher",
-                                                    "Status",
-                                                  ].map((h) => (
-                                                    <span
-                                                      key={h}
-                                                      className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider"
-                                                    >
-                                                      {h}
-                                                    </span>
-                                                  ))}
-                                                </div>
-                                                {svcEvents.map((ev, idx) => (
-                                                  <div
-                                                    key={ev._id}
-                                                    className={`grid grid-cols-[1fr_140px_150px] gap-2 items-center px-3 py-2 ${idx > 0 ? "border-t border-border/50" : ""}`}
-                                                  >
-                                                    <span className="text-[12px] text-foreground">
-                                                      {formatStudioDate(ev.startDateTime, null, { year: "numeric" })}{" "}
-                                                      ·{" "}
-                                                      {formatStudioTime(ev.startDateTime)}
-                                                    </span>
-                                                    <span className="text-[12px] text-muted-foreground truncate">
-                                                      {ev.teacherID?.name ||
-                                                        "—"}
-                                                    </span>
-                                                    <span
-                                                      className={`inline-flex w-fit max-w-full items-center rounded-full px-2 py-0.5 text-[9px] font-bold uppercase leading-tight whitespace-normal text-center ${
-                                                        ev.status ===
-                                                        "completed"
-                                                          ? "bg-info/10 text-info"
-                                                          : ev.status?.startsWith(
-                                                                "cancelled",
-                                                              )
-                                                            ? "bg-destructive/10 text-destructive"
-                                                            : ev.status ===
-                                                                "no_show"
-                                                              ? "bg-warning/10 text-warning"
-                                                              : "bg-violet-500/10 text-violet-500"
-                                                      }`}
-                                                    >
-                                                      {(
-                                                        ev.status || "scheduled"
-                                                      ).replace(/_/g, " ")}
-                                                    </span>
-                                                  </div>
-                                                ))}
-                                                {untracked > 0 && (
-                                                  <div
-                                                    className={`grid grid-cols-[1fr_140px_150px] gap-2 items-center px-3 py-2 ${svcEvents.length > 0 ? "border-t border-border/50" : ""}`}
-                                                  >
-                                                    <span className="text-[12px] text-foreground">
-                                                      {untracked} imported session{untracked === 1 ? "" : "s"} (no lesson date on record)
-                                                    </span>
-                                                    <span className="text-[12px] text-muted-foreground">—</span>
-                                                    <span className="inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[9px] font-bold uppercase leading-tight bg-info/10 text-info">
-                                                      imported
-                                                    </span>
-                                                  </div>
-                                                )}
-                                              </div>
-                                            );
-                                          })()}
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                },
-                              )}
-                              {/* Totals row — sums across all services in
-                                  this enrollment. Session-count columns
-                                  (Enrolled/Completed/Scheduled/Remaining) sum
-                                  across different service types (privates +
-                                  groups + parties + coaching, etc.), so
-                                  they're a rough "sessions total" rather than
-                                  a like-for-like count — Credit Balance is
-                                  the meaningful one since $ is a common unit
-                                  across services. */}
-                              {rows.length > 1 && (
-                                <div
-                                  className="grid items-center px-3 py-2.5 border-t-2 border-border bg-muted/30"
-                                  style={{
-                                    gridTemplateColumns:
-                                      "minmax(0,1fr) 80px 80px 80px 80px 80px",
-                                  }}
-                                >
-                                  <span className="text-[12px] font-bold text-foreground uppercase tracking-wide">
-                                    Total
-                                  </span>
-                                  <span className="text-[13px] font-bold text-foreground text-right">
-                                    {roundSessions(totalEnrolled)}
-                                  </span>
-                                  <span className="text-[13px] font-bold text-foreground text-right">
-                                    {roundSessions(totalUsed)}
-                                  </span>
-                                  <span className="text-[13px] font-bold text-foreground text-right">
-                                    {roundSessions(totalSched)}
-                                  </span>
-                                  <span className="text-[13px] font-bold text-foreground text-right">
-                                    {roundSessions(totalRemaining)}
-                                  </span>
-                                  <span
-                                    className={`text-[13px] font-bold text-right ${totalCreditSessions > 0 ? "text-success" : "text-muted-foreground"}`}
-                                    title={`$${totalCredit.toFixed(2)}`}
-                                  >
-                                    {totalCreditSessions
-                                      .toFixed(2)
-                                      .replace(/\.00$/, "")
-                                      .replace(/(\.\d)0$/, "$1")}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })()}
+                    {/* Services — coverage of completed / scheduled lessons by the money collected */}
+                    {services.length > 0 && (
+                      <EnrollmentServicesTable
+                        enr={enr}
+                        cp={cp}
+                        services={services}
+                        calendarEvents={calendarEvents}
+                        customerID={customerID}
+                        expandedServices={expandedServices}
+                        onToggle={toggleService}
+                      />
+                    )}
 
                     <PaymentTimeline
                       customerID={customerID}
@@ -5728,15 +5279,18 @@ function DateChip({ label, value, placeholder = "Not set", onPick }) {
 
 // ─── Payment History Tab ─────────────────────────────────────────────────────
 
-// Enrollments' buckets minus "expired" — purchases carry no expiry date.
-// Completed = every product checked off (dated ones auto-check once their
-// date passes) with nothing left owed.
+// True once the event / competition this purchase is for is over.
+const purchaseExpired = (p) => Boolean(p.expiryDate) && new Date(p.expiryDate) <= new Date();
+
+// Enrollments' buckets minus "expired". Completed = the event is over (its expiry date has
+// passed, which also checks off every product) or every product was checked off, with
+// nothing left owed. Nobody has to tick products by hand.
 function purchaseStatus(p) {
   if (p.cancelStatus === "cancelled") return "cancelled";
   const items = p.lineItems || [];
   const allChecked =
     items.length > 0 && items.every((li) => li.checkStatus === "checked");
-  return allChecked && Number(p.amountDue ?? p.total ?? 0) <= 0
+  return (allChecked || purchaseExpired(p)) && Number(p.amountDue ?? p.total ?? 0) <= 0
     ? "completed"
     : "active";
 }
@@ -5787,6 +5341,12 @@ function PurchasesTab({ customerID, customerName, locationID, initialPurchaseID 
     else toast.error(res.error || "Failed");
   }
 
+  async function changeExpiryDate(row, ymd) {
+    const res = await api.put(`/api/purchase/${row._id}`, { expiryDate: ymd });
+    if (res.success) { toast.success("Expiry date updated"); load(); }
+    else toast.error(res.error || "Failed to update expiry date");
+  }
+
   async function changePurchaseDate(row, ymd) {
     const res = await api.put(`/api/purchase/${row._id}`, { purchaseDate: dateInputToISO(ymd) });
     if (res.success) { toast.success("Purchase date updated"); load(); }
@@ -5810,7 +5370,10 @@ function PurchasesTab({ customerID, customerName, locationID, initialPurchaseID 
 
   const checkSummary = (row) => {
     const items = row.lineItems || [];
-    const done = items.filter((li) => li.checkStatus === "checked").length;
+    // An event that is over counts every product as done, even before the sweep ticks them.
+    const done = purchaseExpired(row)
+      ? items.length
+      : items.filter((li) => li.checkStatus === "checked").length;
     return { done, total: items.length };
   };
 
@@ -5933,6 +5496,14 @@ function PurchasesTab({ customerID, customerName, locationID, initialPurchaseID 
                       value={r.purchaseDate ?? r.createdAt}
                       onPick={(ymd) => changePurchaseDate(r, ymd)}
                     />
+                    {r.cancelStatus !== "cancelled" && (
+                      <DateChip
+                        label="Expiry"
+                        value={r.expiryDate}
+                        placeholder="Set date"
+                        onPick={(ymd) => changeExpiryDate(r, ymd)}
+                      />
+                    )}
                     {r.cancelStatus !== "cancelled" && (
                       <Button
                         variant="outline"
@@ -6081,15 +5652,20 @@ function PurchasesTab({ customerID, customerName, locationID, initialPurchaseID 
                                   auto ·{" "}
                                   {formatDateTime(li.eventDate)}
                                 </span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  disabled={busyId === li._id}
-                                  onClick={() => toggleLineCheck(r, li)}
-                                  className="rounded border border-border px-2 py-0.5 text-[10px] font-medium hover:bg-muted/60"
+                              ) : r.expiryDate ? (
+                                <span
+                                  className="text-[10px] text-muted-foreground"
+                                  title="Checked off automatically once the event is over"
                                 >
-                                  {busyId === li._id ? "…" : "Mark checked"}
-                                </button>
+                                  auto · {formatDate(r.expiryDate)}
+                                </span>
+                              ) : (
+                                <span
+                                  className="text-[10px] text-muted-foreground"
+                                  title="Set an expiry date on this purchase and it completes automatically"
+                                >
+                                  set expiry date
+                                </span>
                               )}
                             </span>
                           </div>

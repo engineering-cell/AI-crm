@@ -1713,6 +1713,17 @@ function computeGridTopForStartMins(
 }
 
 /**
+ * Order inside one week-view slot: a real lesson must never hide behind a cancelled one.
+ * Live lessons first, then charged cancels / charged no-shows, then no-charge ones.
+ */
+function weekSlotRank(event) {
+  const status = event.extendedProps?.effectiveStatus;
+  if (status === "cancelled_no_charge" || status === "no_show_no_charge") return 2;
+  if (status === "cancelled_charged" || status === "no_show_charged") return 1;
+  return 0;
+}
+
+/**
  * Week day column: same start-time slot (e.g. 9:00) → 1 card + "+N more" (all instructors).
  * Different start times stay separate on the grid.
  */
@@ -1731,6 +1742,7 @@ function layoutWeekDayTimedEvents(events, gridLayout) {
     .map(([bucketKey, bucketEvents]) => {
       const sorted = [...bucketEvents].sort(
         (a, b) =>
+          weekSlotRank(a) - weekSlotRank(b) ||
           new Date(a.start) - new Date(b.start) ||
           String(a.id).localeCompare(String(b.id)),
       );
@@ -1755,6 +1767,7 @@ function layoutWeekDayTimedEvents(events, gridLayout) {
 
     const sortedCluster = [...unit.events].sort(
       (a, b) =>
+        weekSlotRank(a) - weekSlotRank(b) ||
         new Date(a.start) - new Date(b.start) ||
         String(a.id).localeCompare(String(b.id)),
     );
@@ -2597,11 +2610,13 @@ function TutorWeekCalendar({
     setOverflowPopover(null);
   }, [focusDate, events]);
 
+  // Same rule as the day view's "N today" badge, so a day reads the same in both views:
+  // to-dos and no-charge cancellations aren't lessons.
   const eventCountByDay = useMemo(() => {
     const map = {};
     weekDays.forEach((day) => {
-      map[formatLocalDateKey(day)] = events.filter((event) =>
-        isSameDate(new Date(event.start), day),
+      map[formatLocalDateKey(day)] = events.filter(
+        (event) => isCountedEvent(event) && isSameDate(new Date(event.start), day),
       ).length;
     });
     return map;
@@ -3416,13 +3431,36 @@ function CalendarPageInner() {
 
   const fetchCalendarEvents = useCallback(async () => {
     setIsLoadingEvents(true);
-    const params = new URLSearchParams({
-      start: rangeStart.toISOString(),
-      end: rangeEnd.toISOString(),
-      limit: 1000,
-    });
-    const result = await api.get(`/api/calendar?${params}`);
-    if (result.success && Array.isArray(result.data)) {
+    // The endpoint caps a response at `limit` events (oldest first). A busy studio has
+    // more than that in this window, so one request silently dropped the latest lessons.
+    // Paid/Unpaid and the "N left" counters are worked out from a student's whole
+    // lesson history, so a truncated list made them wrong (a paid lesson read "0 Paid").
+    // Keep fetching pages until everything in the window is loaded.
+    const PAGE_SIZE = 1000;
+    const MAX_PAGES = 20;
+    let result = null;
+    const loaded = [];
+    for (let page = 1; page <= MAX_PAGES; page += 1) {
+      const params = new URLSearchParams({
+        start: rangeStart.toISOString(),
+        end: rangeEnd.toISOString(),
+        limit: PAGE_SIZE,
+        page,
+      });
+      const res = await api.get(`/api/calendar?${params}`);
+      if (!res.success || !Array.isArray(res.data)) {
+        // A later page failing must not show a partial calendar as if it were complete.
+        result = res;
+        loaded.length = 0;
+        break;
+      }
+      result = res;
+      loaded.push(...res.data);
+      const total = Number(res.pagination?.total);
+      if (res.data.length < PAGE_SIZE || (Number.isFinite(total) && loaded.length >= total)) break;
+    }
+    if (result?.success) result = { ...result, data: loaded };
+    if (result?.success && Array.isArray(result.data)) {
       const derived = deriveInstructors(result.data);
       // If active teachers have been fetched, use that as the source of truth
       // and filter out any event-derived teachers who are no longer active

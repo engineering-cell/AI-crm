@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import DateRangePresets from '@/components/dashboard-builder/DateRangePresets'
+import { ReportIdsContext } from './chrome'
+import PeriodSelect, { periodLabel as periodLabelFor } from './PeriodSelect'
 import { Button } from '@/components/ui/button'
-import { delta, pointDelta, useOwnerDashboardPage } from '@/lib/hooks/useOwnerDashboardPage'
-import { Chip, DeltaPill, Eyebrow, Foil, money, num } from './chrome'
+import { useOwnerDashboardPage } from '@/lib/hooks/useOwnerDashboardPage'
 import ScorecardSection from './sections/ScorecardSection'
 import RevenueSection from './sections/RevenueSection'
 import LessonsSection from './sections/LessonsSection'
@@ -13,7 +13,6 @@ import CapacitySection from './sections/CapacitySection'
 import ConversionsSection from './sections/ConversionsSection'
 import MarketingSection from './sections/MarketingSection'
 import StudentHealthSection from './sections/StudentHealthSection'
-import ActionsSection from './sections/ActionsSection'
 
 /* ── sticky section nav ─────────────────────────────────────────────────── */
 
@@ -93,7 +92,7 @@ function SectionNav({ sections }) {
             key={s.id}
             href={`#${s.id}`}
             onClick={(e) => jumpTo(e, s.id)}
-            className={`shrink-0 whitespace-nowrap rounded-full border px-3.5 py-2 text-[9.5px] font-bold tracking-[0.16em] transition-colors ${
+            className={`shrink-0 whitespace-nowrap rounded-full border px-3.5 py-1.5 text-[12.5px] font-semibold transition-colors ${
               active === s.id
                 ? 'border-[var(--studio-primary)] bg-[var(--studio-primary)] text-brand-foreground'
                 : 'border-transparent text-muted-foreground hover:border-[color-mix(in_srgb,var(--studio-primary)_30%,transparent)] hover:text-foreground'
@@ -107,98 +106,7 @@ function SectionNav({ sections }) {
   )
 }
 
-/* ── hero ───────────────────────────────────────────────────────────────── */
-
-function HeroStat({ label, value, mom, yoy }) {
-  return (
-    <div className="p-6 transition-colors hover:bg-[color-mix(in_srgb,var(--studio-primary)_4%,hsl(var(--card)))]">
-      <p className="text-[9.5px] font-bold uppercase tracking-[0.28em] text-muted-foreground">{label}</p>
-      <p className="od-figure my-3 text-[clamp(32px,3.4vw,50px)] leading-none">
-        <Foil>{value ?? '—'}</Foil>
-      </p>
-      <div className="flex flex-wrap gap-1.5">
-        <DeltaPill d={mom} label="MoM" />
-        <DeltaPill d={yoy} label="YoY" />
-      </div>
-    </div>
-  )
-}
-
-function Hero({ summaries, periodLabel }) {
-  const cur = summaries.current || {}
-  const prev = summaries.previous || {}
-  const ly = summaries.lastYear || {}
-
-  const stats = [
-    {
-      label: `Revenue · ${periodLabel}`,
-      value: cur.revenue !== null && cur.revenue !== undefined ? money(cur.revenue) : null,
-      mom: delta(cur.revenue, prev.revenue),
-      yoy: delta(cur.revenue, ly.revenue),
-    },
-    {
-      label: 'Lessons Taught',
-      value: cur.lessons !== null && cur.lessons !== undefined ? num(cur.lessons) : null,
-      mom: delta(cur.lessons, prev.lessons),
-      yoy: delta(cur.lessons, ly.lessons),
-    },
-    {
-      label: 'Lessons Scheduled',
-      value: cur.scheduled !== null && cur.scheduled !== undefined ? num(cur.scheduled) : null,
-      mom: delta(cur.scheduled, prev.scheduled),
-      yoy: delta(cur.scheduled, ly.scheduled),
-    },
-    {
-      label: 'Currently Booked',
-      value: cur.bookedPct !== null && cur.bookedPct !== undefined ? `${cur.bookedPct}%` : null,
-      mom: pointDelta(cur.bookedPct, prev.bookedPct),
-      yoy: pointDelta(cur.bookedPct, ly.bookedPct),
-    },
-  ]
-
-  return (
-    <div className="relative overflow-hidden py-14 sm:py-16">
-      <div
-        className="pointer-events-none absolute -top-56 left-1/2 h-[520px] w-[900px] -translate-x-1/2"
-        style={{
-          background:
-            'radial-gradient(ellipse at center, color-mix(in srgb, var(--studio-primary) 14%, transparent), transparent 65%)',
-        }}
-        aria-hidden
-      />
-      <div className="relative">
-        <Eyebrow>Organization Owner · Executive Operating System</Eyebrow>
-        <h1 className="od-display mt-6 text-[clamp(38px,5.4vw,76px)] leading-[1.02] text-foreground">
-          The 30-Second
-          <br />
-          <em className="italic">
-            <Foil>Board Meeting.</Foil>
-          </em>
-        </h1>
-        <p className="mt-5 max-w-[780px] text-[15px] font-light leading-[1.75] text-muted-foreground">
-          Growth, money, capacity, conversions, marketing, engagement, priorities — every question an owner asks,
-          answered on one screen. One navigation pattern everywhere:{' '}
-          <b className="font-bold text-[var(--studio-primary)]">Organization → Studio → Instructor → Customer</b>.
-        </p>
-        <div className="od-bento mt-12 grid-cols-2 lg:grid-cols-4">
-          {stats.map((s) => (
-            <HeroStat key={s.label} {...s} />
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 /* ── page ───────────────────────────────────────────────────────────────── */
-
-function periodLabelFor(range) {
-  if (range && typeof range === 'object') return `${range.from} → ${range.to}`
-  if (range === 7) return 'Last 7 days'
-  if (range === 90) return 'Last 90 days'
-  if (range === 365) return 'Last 12 months'
-  return 'Last 30 days'
-}
 
 function Skeleton() {
   return (
@@ -211,7 +119,8 @@ function Skeleton() {
 }
 
 export default function OwnerDashboardPage() {
-  const [range, setRange] = useState(30)
+  const [range, setRange] = useState('mtd')
+  const [showIds, setShowIds] = useState(false)
   const { data, classic, summaries, comparisons, error, isLoading, isValidating, refresh } = useOwnerDashboardPage(range)
 
   const periodLabel = periodLabelFor(range)
@@ -220,35 +129,38 @@ export default function OwnerDashboardPage() {
   // key means "this user may not see it" — the section and its nav entry are
   // dropped rather than rendered as a wall of empty states.
   const sections = useMemo(() => {
-    const list = [{ id: 'od-scorecard', label: 'SCORECARD' }]
-    if (data?.revenue) list.push({ id: 'od-revenue', label: 'REVENUE' })
+    const list = [{ id: 'od-scorecard', label: 'Scorecard' }]
+    if (data?.revenue) list.push({ id: 'od-revenue', label: 'Revenue' })
     if (data?.lessons) {
-      list.push({ id: 'od-lessons', label: 'LESSONS' })
-      list.push({ id: 'od-forecast', label: 'FORECAST' })
-      list.push({ id: 'od-capacity', label: 'UTILIZATION' })
+      list.push({ id: 'od-lessons', label: 'Lessons' })
+      list.push({ id: 'od-forecast', label: 'Forecast' })
+      list.push({ id: 'od-capacity', label: 'Instructor utilization' })
     }
-    if (data?.funnel) list.push({ id: 'od-conversions', label: 'CONVERSIONS' })
-    list.push({ id: 'od-marketing', label: 'MARKETING' })
-    if (data?.studentHealth) list.push({ id: 'od-health', label: 'STUDENT HEALTH' })
-    list.push({ id: 'od-actions', label: 'PRIORITIES' })
+    if (data?.funnel) list.push({ id: 'od-conversions', label: 'Conversion funnel' })
+    if (data?.marketing) list.push({ id: 'od-marketing', label: 'Marketing' })
+    if (data?.studentHealth) list.push({ id: 'od-health', label: 'Student health' })
     return list
   }, [data])
 
   const shared = { data, classic, comparisons, summaries, rangeDays: range }
 
   return (
+    <ReportIdsContext.Provider value={showIds}>
     <div className="pb-20">
-      <header className="flex flex-wrap items-center justify-between gap-4 pb-5 pt-1">
+      <header className="flex flex-wrap items-end justify-between gap-4 pb-9 pt-1">
         <div>
-          <p className="text-[15px] font-bold tracking-[0.2em] text-foreground">
-            OWNER <span className="text-[var(--studio-primary)]">DASHBOARD</span>
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+            Organization owner · {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            {data?.studentHealth?.perStudio ? ` · ${data.studentHealth.perStudio.length} studios` : ''}
+          </p>
+          <h1 className="text-[24px] font-extrabold leading-tight text-foreground">Studio performance</h1>
+          <p className="text-[12.5px] text-muted-foreground">
+            Every card drills down the same way: Organization → Studio → Instructor → Customer.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
           {isValidating && <span className="text-[11px] text-muted-foreground">Updating…</span>}
-          <Chip>{periodLabel.toUpperCase()}</Chip>
-          <Chip ghost>ORGANIZATION SCOPE</Chip>
-          <DateRangePresets value={range} onChange={setRange} />
+          <PeriodSelect value={range} onChange={setRange} />
         </div>
       </header>
 
@@ -270,9 +182,7 @@ export default function OwnerDashboardPage() {
         <Skeleton />
       ) : (
         <>
-          <Hero summaries={summaries} periodLabel={periodLabel} />
-
-          <ScorecardSection summaries={summaries} />
+          <ScorecardSection summaries={summaries} data={data} />
           {data?.revenue && <RevenueSection {...shared} />}
           {data?.lessons && (
             <>
@@ -282,16 +192,20 @@ export default function OwnerDashboardPage() {
             </>
           )}
           {data?.funnel && <ConversionsSection {...shared} />}
-          <MarketingSection {...shared} />
+          {data?.marketing && <MarketingSection {...shared} />}
           {data?.studentHealth && <StudentHealthSection {...shared} />}
-          <ActionsSection {...shared} />
 
-          <p className="mt-20 text-center text-[10px] font-semibold tracking-[0.22em] text-muted-foreground">
-            DRILL-DOWN HIERARCHY &nbsp;·&nbsp; <b className="text-[var(--studio-primary)]">ORGANIZATION</b> → STUDIO →
-            INSTRUCTOR → CUSTOMER &nbsp;·&nbsp; ONE NAVIGATION PATTERN EVERYWHERE
-          </p>
         </>
       )}
+      <button
+        type="button"
+        onClick={() => setShowIds((v) => !v)}
+        aria-pressed={showIds}
+        className="fixed bottom-4 right-4 z-30 rounded-full border border-border bg-card px-3.5 py-2 text-[12px] font-semibold text-foreground shadow-lg hover:bg-muted"
+      >
+        {showIds ? 'Hide report IDs' : 'Show report IDs'}
+      </button>
     </div>
+    </ReportIdsContext.Provider>
   )
 }

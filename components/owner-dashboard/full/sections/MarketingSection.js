@@ -1,200 +1,126 @@
 'use client'
 
-import { useMemo } from 'react'
 import DonutChart from '@/components/dashboard/widgets/DonutChart'
 import LeadsDetailsButton from '@/components/owner-dashboard/widgets/LeadsDetailsButton'
 import { formatFieldDisplayValue } from '@/lib/dynamic-list-normalize'
-import { Caveat, Empty, Legend, NotAvailable, Panel, PanelHead, Reveal, SectionHead, moneyShort, num } from '../chrome'
-import { Cell, DataTable, RankedBars, Row, StackedCompare } from '../viz'
+import CardFrame from '../CardFrame'
+import { Empty, Legend, SectionHead, moneyShort, num } from '../chrome'
+import { RankedBars } from '../viz'
 import { formatDate } from '@/lib/utils'
 
 const LEAD_COLUMNS = [
   { key: 'name', label: 'Name' },
   { key: 'email', label: 'Email' },
   { key: 'phoneNumber', label: 'Phone' },
-  { key: 'uploadType', label: 'Source', format: (v) => formatFieldDisplayValue(v) },
+  { key: 'uploadType', label: 'Entry method', format: (v) => formatFieldDisplayValue(v) },
   { key: 'stage', label: 'Stage', format: (v) => formatFieldDisplayValue(v) },
   { key: 'createdAt', label: 'Created', format: (v) => formatDate(v) || '—' },
 ]
 
-export default function MarketingSection({ classic, rangeDays }) {
-  const sources = useMemo(() => classic?.leadsBySourceConversion || [], [classic])
-  const revenueBySource = useMemo(() => classic?.revenueBySource || [], [classic])
-  const zipRows = useMemo(() => classic?.leadDensityByZip || [], [classic])
-  const studios = useMemo(() => classic?.perStudioBreakdown || [], [classic])
-  const totalLeads = sources.reduce((s, r) => s + (Number(r.totalLeads) || 0), 0)
-  const totalSourceRevenue = revenueBySource.reduce((s, r) => s + (Number(r.revenue) || 0), 0)
+/** Category colours from the spec, in order. */
+const SOURCE_COLORS = {
+  Meta: '#8A0F4D',
+  Google: '#C42A77',
+  Referral: '#E87FB0',
+  Organic: '#4A3352',
+  'Walk-in': '#9D85E8',
+  Unknown: '#5BB8E8',
+}
 
+function LeadsBySource({ d }) {
+  const m = d.marketing
+  const sources = (m?.leadsBySource || []).filter((r) => r.count > 0)
+  return sources.length ? (
+    <div className="mt-4 grid items-center gap-4 sm:grid-cols-[200px_1fr]">
+      <DonutChart
+        data={sources.map((s) => ({ name: s.source, value: s.count, color: SOURCE_COLORS[s.source] }))}
+        centerLabel="Leads"
+        centerValue={num(m.leadTotal)}
+        height={190}
+        valueFormatter={(v) => num(v)}
+        showLegend={false}
+      />
+      <ul className="text-[13.5px]">
+        {sources.map((s) => (
+          <li key={s.source} className="flex items-center gap-2 border-b border-border/60 py-1.5 last:border-b-0">
+            <i className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: SOURCE_COLORS[s.source] }} />
+            <span className="flex-1 font-semibold text-foreground">{s.source}</span>
+            <span className="tabular-nums text-foreground">{num(s.count)}</span>
+            <span className="w-14 text-right tabular-nums text-muted-foreground">{s.pct.toFixed(1)}%</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  ) : (
+    <Empty message="No data for this period" height={200} />
+  )
+}
+
+function RevenueBySource({ d }) {
+  const rows = (d.marketing?.revenueBySource || []).filter((r) => r.revenue !== 0)
+  return rows.length ? (
+    <div className="mt-4">
+      <RankedBars rows={rows.map((r) => ({ label: r.source, value: r.revenue }))} valueFormatter={moneyShort} />
+    </div>
+  ) : (
+    <Empty message="No data for this period" height={200} />
+  )
+}
+
+function LeadsByStudio({ d }) {
+  const studios = d.marketing?.leadsByStudioSource || []
+  return studios.length ? (
+    <>
+      <div className="mt-4 flex flex-col gap-2.5">
+        {studios.map((st) => (
+          <div key={st.location} className="grid grid-cols-[minmax(0,130px)_1fr_56px] items-center gap-3">
+            <span className="truncate text-[12px] font-semibold text-foreground" title={st.location}>{st.location}</span>
+            <div className="flex h-3.5 overflow-hidden rounded-[3px] bg-muted">
+              {st.sources.filter((x) => x.count > 0).map((x) => (
+                <div
+                  key={x.source}
+                  title={`${x.source}: ${num(x.count)} (${((x.count / st.total) * 100).toFixed(1)}%)`}
+                  style={{ width: `${(x.count / st.total) * 100}%`, background: SOURCE_COLORS[x.source] }}
+                />
+              ))}
+            </div>
+            <span className="text-right text-[12px] font-bold tabular-nums text-[var(--studio-primary)]">{num(st.total)}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3">
+        <Legend items={Object.entries(SOURCE_COLORS).map(([label, color]) => ({ label, color }))} />
+      </div>
+    </>
+  ) : (
+    <Empty message="No data for this period" height={160} />
+  )
+}
+
+export default function MarketingSection({ data, comparisons, rangeDays }) {
+  const frame = { data, comparisons, pageRange: rangeDays }
   return (
-    <section id="od-marketing" className="mt-24 scroll-mt-32">
+    <section id="od-marketing" className="mt-[26px] scroll-mt-32">
       <SectionHead
         number="07"
-        title="Marketing"
-        emphasis="Performance"
-        tag="Q2 · WHERE DO STUDENTS COME FROM?"
-        subtitle="Which channels produce the best customers — not just the most leads."
+        title="Marketing performance"
+        tag="Where do students come from?"
+        subtitle="Which sources bring leads and revenue."
       />
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Reveal delay={1}>
-          <Panel className="h-full">
-            <PanelHead
-              title="Leads by Source"
-              note={totalLeads ? `${num(totalLeads)} leads in window` : null}
-              detailsButton={<LeadsDetailsButton rangeDays={rangeDays} columns={LEAD_COLUMNS} />}
-            />
-            {sources.length ? (
-              <div className="mt-4">
-                <DonutChart
-                  data={sources.map((r) => ({ name: r.leadSource, value: r.totalLeads }))}
-                  centerLabel="Leads"
-                  centerValue={num(totalLeads)}
-                  height={200}
-                  valueFormatter={(v) => `${num(v)} leads`}
-                />
-              </div>
-            ) : (
-              <Empty message="No leads in this period." height={220} />
-            )}
-          </Panel>
-        </Reveal>
-
-        <Reveal delay={2}>
-          <Panel className="h-full">
-            <PanelHead title="Revenue by Source" note="attributed to the converting lead" />
-            {revenueBySource.length ? (
-              <div className="mt-4">
-                <RankedBars
-                  rows={revenueBySource.map((r) => ({ label: r.leadSource, value: r.revenue }))}
-                  valueFormatter={moneyShort}
-                />
-                <p className="mt-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                  {moneyShort(totalSourceRevenue)} total
-                </p>
-              </div>
-            ) : (
-              <Empty message="No attributed revenue in this period." height={220} />
-            )}
-          </Panel>
-        </Reveal>
+      <div className="grid grid-cols-1 gap-[18px] [&>*]:min-w-0 min-[1200px]:grid-cols-2">
+        <CardFrame {...frame} title="R-19 Leads by source" details={(r) => <LeadsDetailsButton rangeDays={r} columns={LEAD_COLUMNS} />}>
+          {(d) => <LeadsBySource d={d} />}
+        </CardFrame>
+        <CardFrame {...frame} title="R-20 Revenue by source" note="first-touch">
+          {(d) => <RevenueBySource d={d} />}
+        </CardFrame>
       </div>
 
-      <Reveal className="mt-4">
-        <Panel>
-          <PanelHead
-            title="Channel Economics"
-            detailsButton={<LeadsDetailsButton rangeDays={rangeDays} columns={LEAD_COLUMNS} />}
-          />
-          {sources.length ? (
-            <>
-              <DataTable
-                head={['Source', 'Leads', 'Bookings', 'Lead → Booking', 'Cost / Lead', 'Revenue', 'Cost / Sale', 'ROAS']}
-                minWidth={760}
-              >
-                {sources.map((r, i) => (
-                  <Row key={r.leadSource}>
-                    <Cell first tone={i === 0 ? 'text-[var(--studio-primary)]' : 'text-foreground'}>
-                      {r.leadSource}
-                    </Cell>
-                    <Cell>{num(r.totalLeads)}</Cell>
-                    <Cell>{num(r.bookings)}</Cell>
-                    <Cell
-                      tone={
-                        r.convRatePct >= 30 ? 'text-success font-bold' : r.convRatePct >= 15 ? 'text-warning' : 'text-muted-foreground'
-                      }
-                    >
-                      {r.convRate}
-                    </Cell>
-                    <Cell tone="text-muted-foreground">{r.costPerLead}</Cell>
-                    <Cell tone="text-muted-foreground">&mdash;</Cell>
-                    <Cell tone="text-muted-foreground">&mdash;</Cell>
-                    <Cell tone="text-muted-foreground">&mdash;</Cell>
-                  </Row>
-                ))}
-              </DataTable>
-              <p className="mt-3 text-[10.5px] leading-relaxed text-muted-foreground">
-                Cost per lead is the platform&apos;s own messaging and AI spend spread evenly across leads — it is not ad
-                spend. Revenue, cost per sale and ROAS stay blank until ad spend is imported per channel and revenue is
-                attributed to a source.
-              </p>
-            </>
-          ) : (
-            <NotAvailable
-              message="Lead source data is not visible to your role."
-              requires="Channel economics come from the classic dashboard overview, which needs the Lead Conversion dashboard permission."
-              height={180}
-            />
-          )}
-        </Panel>
-      </Reveal>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Reveal delay={1}>
-          <Panel className="h-full">
-            <PanelHead title="Lead Density by ZIP" note="top 8 · converted leads only" />
-            <DataTable
-              head={['ZIP', 'Leads', 'Starters', 'Revenue']}
-              minWidth={420}
-              emptyMessage={zipRows.length ? undefined : 'No converted leads with a known ZIP in this period.'}
-            >
-              {zipRows.map((r) => (
-                <Row key={r.zip}>
-                  <Cell first>{r.zip}</Cell>
-                  <Cell tone="text-[var(--studio-primary)] font-bold">{num(r.leads)}</Cell>
-                  <Cell>{num(r.starters)}</Cell>
-                  <Cell>{moneyShort(r.revenue)}</Cell>
-                </Row>
-              ))}
-            </DataTable>
-            <Caveat>
-              A ZIP is only known once a lead converts — the address lives on the Customer record, not the Lead — so
-              unconverted leads never appear here.
-            </Caveat>
-          </Panel>
-        </Reveal>
-
-        <Reveal delay={2}>
-          <Panel className="h-full">
-            <PanelHead
-              title="Leads by Studio"
-              note="booked vs not booked"
-              detailsButton={<LeadsDetailsButton rangeDays={rangeDays} columns={LEAD_COLUMNS} />}
-            />
-            {studios.length ? (
-              <>
-                <div className="mt-3">
-                  <Legend
-                    items={[
-                      { label: 'Booked an intro', color: 'var(--studio-primary)' },
-                      { label: 'Not booked', color: 'color-mix(in srgb, hsl(var(--destructive)) 38%, transparent)' },
-                    ]}
-                  />
-                </div>
-                <div className="mt-3">
-                  <StackedCompare
-                    rows={studios.map((r) => ({
-                      label: r.location,
-                      sublabel: `${r.bookingRate} booking rate`,
-                      a: r.bookings,
-                      b: Math.max(r.totalLeads - r.bookings, 0),
-                      valueLabel: num(r.totalLeads),
-                    }))}
-                  />
-                </div>
-                <p className="mt-3 text-[10.5px] leading-relaxed text-muted-foreground">
-                  Split by outcome rather than by source — per-studio lead counts are not broken down by channel on the
-                  server.
-                </p>
-              </>
-            ) : (
-              <NotAvailable
-                message="Per-studio lead data is not visible to your role."
-                requires="Needs the Lead Conversion dashboard permission."
-                height={280}
-              />
-            )}
-          </Panel>
-        </Reveal>
+      <div className="mt-[18px]">
+        <CardFrame {...frame} title="R-21 Leads by studio & source" className="">
+          {(d) => <LeadsByStudio d={d} />}
+        </CardFrame>
       </div>
     </section>
   )

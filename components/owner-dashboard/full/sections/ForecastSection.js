@@ -1,146 +1,124 @@
 'use client'
 
-import { useMemo } from 'react'
 import DetailsButton from '@/components/owner-dashboard/widgets/DetailsButton'
-import { Caveat, Dash, Empty, NotAvailable, Panel, PanelHead, Reveal, SectionHead, moneyShort, num } from '../chrome'
+import CardFrame from '../CardFrame'
+import { useState } from 'react'
+import { Dash, Empty, SectionHead, moneyShort, num } from '../chrome'
 import { Cell, DataTable, RankedBars, RevenueLessonsCombo, Row } from '../viz'
 import { formatDate } from '@/lib/utils'
 
 const FORECAST_COLUMNS = [
   { key: 'date', label: 'Date', format: (v) => formatDate(v) || '—' },
   { key: 'studio', label: 'Studio' },
-  { key: 'teacher', label: 'Teacher' },
+  { key: 'teacher', label: 'Instructor' },
   { key: 'title', label: 'Lesson' },
 ]
 
-/**
- * The combo chart's revenue bars come from the classic overview's 12-month
- * history. There is no matching monthly lesson series — `lessons.trend` is
- * week-buckets inside the selected window only — so the line is left off and
- * the panel says so rather than inventing a second axis from nothing.
- */
-function buildCombo(monthly) {
-  if (!monthly?.length) return null
-  const lastReal = monthly.reduce((last, row, i) => (Number(row.thisYear) ? i : last), -1)
-  const trimmed = lastReal >= 0 ? monthly.slice(0, lastReal + 1) : monthly
-  return trimmed.map((row) => ({ label: row.month, revenue: Math.round(Number(row.thisYear) || 0), lessons: 0 }))
+/** Spec colour rule for utilization: 90%+ red · 70–89% green · under 70% orange. */
+export const utilTone = (pct) =>
+  pct === null || pct === undefined ? 'text-muted-foreground' : pct >= 90 ? 'text-[#C13049]' : pct >= 70 ? 'text-[#1C8553]' : 'text-[#C2571A]'
+
+const pct1 = (v) => `${Number(v).toFixed(1)}%`
+
+const COLLAPSED_ROWS = 8
+
+/** First rows of a long list, with a "Show all" toggle so rows of cards stay a similar height. */
+export function useCollapsedRows(rows, limit = COLLAPSED_ROWS) {
+  const [all, setAll] = useState(false)
+  const shown = all || rows.length <= limit ? rows : rows.slice(0, limit)
+  const toggle =
+    rows.length > limit ? (
+      <button type="button" onClick={() => setAll((v) => !v)} className="mt-2 self-start text-[12.5px] font-semibold text-[var(--studio-primary)] hover:underline">
+        {all ? 'Show fewer' : `Show all ${rows.length} instructors`}
+      </button>
+    ) : null
+  return { shown, toggle }
 }
 
-export default function ForecastSection({ data, classic, rangeDays }) {
-  const lessons = data?.lessons
-  const forecast = useMemo(
-    () => [...(lessons?.forecastByStudio || [])].sort((a, b) => b.scheduled - a.scheduled),
-    [lessons]
+function InstructorForecast({ rows }) {
+  const { shown, toggle } = useCollapsedRows(rows)
+  return rows.length ? (
+    <>
+      <DataTable head={['Instructor', 'Studio', 'Scheduled', 'Total capacity', 'Remaining slots', 'Projected utilization']} minWidth={640}>
+        {shown.map((r) => (
+          <Row key={`${r.teacher}-${r.studio}`}>
+            <Cell first>{r.teacher}</Cell>
+            <Cell>{r.studio || <Dash />}</Cell>
+            <Cell>{num(r.scheduled)}</Cell>
+            <Cell>{num(r.capacitySlots)}</Cell>
+            <Cell>{num(r.remainingSlots)}</Cell>
+            <Cell tone={`${utilTone(r.utilizationPct)} font-bold`}>{r.utilizationPct === null ? <Dash /> : pct1(r.utilizationPct)}</Cell>
+          </Row>
+        ))}
+      </DataTable>
+      {toggle}
+    </>
+  ) : (
+    <Empty message="No data for this period" height={160} />
   )
-  const combo = useMemo(() => buildCombo(classic?.aiAgentRevenue), [classic])
-  const forecastByTeacher = lessons?.forecastByTeacher || []
-  const totalScheduled = forecast.reduce((s, r) => s + (Number(r.scheduled) || 0), 0)
+}
 
+export default function ForecastSection({ data, comparisons, rangeDays }) {
+  const frame = { data, comparisons, pageRange: rangeDays }
   return (
-    <section id="od-forecast" className="mt-24 scroll-mt-32">
+    <section id="od-forecast" className="mt-[26px] scroll-mt-32">
       <SectionHead
         number="04"
-        title="Lesson"
-        emphasis="Forecast"
-        tag="Q1 · WHAT WILL WE TEACH NEXT?"
-        subtitle="Scheduled lessons sit beside taught lessons, so volume, staffing and capacity get acted on together."
+        title="Lesson forecast"
+        tag="What will we teach next?"
+        subtitle="Confirmed lessons coming up this week."
       />
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Reveal delay={1}>
-          <Panel className="h-full">
-            <PanelHead
-              title="Scheduled by Studio"
-              note="confirmed future lessons only"
-              detailsButton={
-                <DetailsButton
-                  title="Scheduled Lessons Forecast — full details"
-                  metric="lessonForecast"
-                  rangeDays={rangeDays}
-                  columns={FORECAST_COLUMNS}
-                />
-              }
-            />
-            {forecast.length ? (
-              <>
-                <p className="od-figure mt-3 text-[38px] leading-none text-[var(--studio-primary)]">
-                  {num(totalScheduled)}
-                </p>
-                <p className="mb-3 mt-1 text-[11px] text-muted-foreground">lessons on the books across the network</p>
-                <RankedBars rows={forecast.map((r) => ({ label: r.location, value: r.scheduled }))} />
-              </>
+      <div className="grid grid-cols-1 gap-[18px] [&>*]:min-w-0 min-[1200px]:grid-cols-2">
+        <CardFrame
+          {...frame}
+          title="R-09 Scheduled this week by studio"
+          snapshot="This week"
+          details={(r) => <DetailsButton title="Scheduled Lessons — full details" metric="forecastByStudio" rangeDays={r} columns={FORECAST_COLUMNS} />}
+        >
+          {(d) => {
+            const byStudio = [...(d.lessons?.scheduledThisWeek?.byStudio || [])].sort((a, b) => b.scheduled - a.scheduled)
+            return byStudio.length ? (
+              <div className="mt-4">
+                <RankedBars labelWidth={210} rows={byStudio.map((r) => ({ label: r.location, value: r.scheduled }))} accent="#E87FB0" />
+              </div>
             ) : (
-              <Empty message="No upcoming lessons scheduled." height={220} />
-            )}
-          </Panel>
-        </Reveal>
+              <Empty message="No data for this period" height={160} />
+            )
+          }}
+        </CardFrame>
 
-        <Reveal delay={2}>
-          <Panel className="h-full">
-            <PanelHead title="Scheduled by Instructor" note="forecast & usable capacity" />
-            <DataTable
-              head={['Instructor', 'Studio', 'Scheduled', 'Capacity', 'Remaining/wk', 'Projected']}
-              minWidth={620}
-              emptyMessage={forecastByTeacher.length ? undefined : 'No upcoming lessons scheduled.'}
-            >
-              {forecastByTeacher.map((t, i) => (
-                <Row key={`${t.teacher}-${i}`}>
-                  <Cell first>{t.teacher}</Cell>
-                  <Cell>{t.studio || <Dash />}</Cell>
-                  <Cell tone="text-[var(--studio-primary)] font-bold">{num(t.scheduled)}</Cell>
-                  <Cell>{t.weeklyCapacity === null ? <Dash /> : num(t.weeklyCapacity)}</Cell>
-                  <Cell tone={t.remainingPerWeek > 0 ? 'text-success' : 'text-muted-foreground'}>
-                    {t.remainingPerWeek === null ? <Dash /> : t.remainingPerWeek}
-                  </Cell>
-                  <Cell
-                    tone={
-                      t.projectedUtilizationPct === null
-                        ? 'text-muted-foreground'
-                        : t.projectedUtilizationPct >= 90
-                        ? 'text-destructive font-bold'
-                        : t.projectedUtilizationPct >= 75
-                          ? 'text-warning'
-                          : 'text-success'
-                    }
-                  >
-                    {t.projectedUtilizationPct === null ? <Dash /> : `${t.projectedUtilizationPct}%`}
-                  </Cell>
-                </Row>
-              ))}
-            </DataTable>
-            <Caveat>
-              Scheduled is every future lesson already on this instructor&apos;s calendar, not bounded to the next 7
-              days. Remaining/wk and Projected extrapolate from their recent weekly pace, not from the schedule itself —
-              there is no lessons-per-future-week series to derive a true forecast from. Capacity columns are blank
-              for instructors with no weekly capacity set; lessons with no instructor assigned are listed as
-              Unassigned.
-            </Caveat>
-          </Panel>
-        </Reveal>
+        <CardFrame
+          {...frame}
+          title="R-10 Scheduled this week by instructor"
+          snapshot="This week"
+          details={(r) => <DetailsButton title="Scheduled by Instructor — full details" metric="forecastByTeacher" rangeDays={r} columns={FORECAST_COLUMNS} />}
+        >
+          {(d) => <InstructorForecast rows={d.lessons?.spec?.instructorWeek?.rows || []} />}
+        </CardFrame>
       </div>
 
-      <Reveal className="mt-4">
-        <Panel>
-          <PanelHead title="Revenue & Lessons Trend" note="last 12 months · bars = revenue" />
-          {combo ? (
-            <>
-              <div className="mt-3">
-                <RevenueLessonsCombo data={combo} height={290} moneyFormatter={moneyShort} />
-              </div>
-              <p className="mt-3 text-[10.5px] leading-relaxed text-muted-foreground">
-                The lessons line is off: lesson counts are only bucketed by week inside the selected window, so there is
-                no 12-month lesson history to plot against revenue.
-              </p>
-            </>
-          ) : (
-            <NotAvailable
-              message="Revenue history is not visible to your role."
-              requires="The 12-month series comes from the classic dashboard overview, which needs the AI Analytics dashboard permission."
-              height={250}
-            />
-          )}
-        </Panel>
-      </Reveal>
+      <div className="mt-[18px]">
+        <CardFrame {...frame} title="R-11 Revenue & lessons trend" snapshot="Last 12 months" className="">
+          {(d) => {
+            const rev = d.revenue?.spec?.netSales?.trend?.monthly12
+            const les = d.lessons?.spec?.monthly12
+            if (!rev || !les) return <Empty message="No data for this period" height={200} />
+            const combo = rev.map((r, i) => ({ label: r.label, revenue: r.value, lessons: les[i]?.value || 0 }))
+            return (
+              <>
+                <div className="mt-3">
+                  <RevenueLessonsCombo data={combo} height={290} moneyFormatter={moneyShort} />
+                </div>
+                <div className="mt-2 flex gap-4 text-[12px] text-muted-foreground">
+                  <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-[#E87FB0]" /> Net sales (left)</span>
+                  <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-[#4A3352]" /> Lessons taught (right)</span>
+                </div>
+              </>
+            )
+          }}
+        </CardFrame>
+      </div>
     </section>
   )
 }

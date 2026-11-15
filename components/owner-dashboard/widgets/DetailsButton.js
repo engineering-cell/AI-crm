@@ -10,11 +10,11 @@ import { setDashboardDetailsRequest } from '@/lib/dashboardDetailsStore'
  * /api/dashboard/owner-overview/details) and navigates to the shared details
  * page instead of opening a modal.
  */
-export default function DetailsButton({ title, metric, rangeDays, params, columns }) {
+export default function DetailsButton({ title, metric, rangeDays, params, columns, drill }) {
   const router = useRouter()
 
   function handleClick() {
-    setDashboardDetailsRequest({ source: 'owner', title, metric, rangeDays, params, columns, backHref: '/dashboard' })
+    setDashboardDetailsRequest({ source: 'owner', title, metric, rangeDays, params, columns, drill, backHref: '/dashboard' })
     router.push('/dashboard/details')
   }
 

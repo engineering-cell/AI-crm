@@ -1,136 +1,93 @@
 'use client'
 
-import { useMemo } from 'react'
 import DetailsButton from '@/components/owner-dashboard/widgets/DetailsButton'
-import { Caveat, Dash, Empty, NotAvailable, Panel, PanelHead, Reveal, SectionHead, num } from '../chrome'
-import { CapacityMeter, Cell, DataTable, RankedBars, Row } from '../viz'
+import CardFrame from '../CardFrame'
+import { Dash, Empty, SectionHead, num } from '../chrome'
+import { CapacityMeter, Cell, DataTable, Row } from '../viz'
 import { formatDate } from '@/lib/utils'
+import { useCollapsedRows, utilTone } from './ForecastSection'
 
 const UTILIZATION_COLUMNS = [
   { key: 'date', label: 'Date', format: (v) => formatDate(v) || '—' },
-  { key: 'teacher', label: 'Teacher' },
+  { key: 'teacher', label: 'Instructor' },
   { key: 'studio', label: 'Studio' },
   { key: 'title', label: 'Lesson' },
   { key: 'status', label: 'Status' },
 ]
 
-export default function CapacitySection({ data, summaries, rangeDays }) {
-  const all = data?.lessons?.instructorUtilization || []
-  const configured = useMemo(() => all.filter((t) => t.weeklyCapacity > 0), [all])
-  const unconfigured = all.length - configured.length
+const barTone = (pct) => (pct >= 90 ? 'bg-[#C13049]' : pct >= 70 ? 'bg-[#1C8553]' : 'bg-[#C2571A]')
+const pct1 = (v) => `${Number(v).toFixed(1)}%`
 
-  const cur = summaries?.current
-  const capacity = cur?.capacityPerWeek || 0
-  const actual = cur?.actualPerWeek || 0
-  const utilization = cur?.utilizationPct
-  const spare = Math.max(capacity - actual, 0)
+function UtilizationTable({ rows }) {
+  const { shown, toggle } = useCollapsedRows(rows)
+  return rows.length ? (
+    <>
+      <DataTable head={['Instructor', 'Studio', 'Available hrs', 'Booked hrs', '', 'Utilization']} minWidth={620}>
+        {shown.map((r) => (
+          <Row key={`${r.teacher}-${r.studio}`}>
+            <Cell first>{r.teacher}</Cell>
+            <Cell>{r.studio || <Dash />}</Cell>
+            <Cell>{r.availableHrs ? num(r.availableHrs) : <span title="No weekly capacity set"><Dash /></span>}</Cell>
+            <Cell>{num(r.bookedHrs)}</Cell>
+            <Cell>
+              {r.utilizationPct !== null && (
+                <span className="block h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+                  <span className={`block h-full ${barTone(r.utilizationPct)}`} style={{ width: `${Math.min(r.utilizationPct, 100)}%` }} />
+                </span>
+              )}
+            </Cell>
+            <Cell tone={`${utilTone(r.utilizationPct)} font-bold`}>{r.utilizationPct === null ? <Dash /> : pct1(r.utilizationPct)}</Cell>
+          </Row>
+        ))}
+      </DataTable>
+      {toggle}
+    </>
+  ) : (
+    <Empty message="No data for this period" height={160} />
+  )
+}
 
+export default function CapacitySection({ data, comparisons, rangeDays }) {
+  const frame = { data, comparisons, pageRange: rangeDays }
   return (
-    <section id="od-capacity" className="mt-24 scroll-mt-32">
+    <section id="od-capacity" className="mt-[26px] scroll-mt-32">
       <SectionHead
         number="05"
-        title="Instructor"
-        emphasis="Utilization"
-        tag="Q6 · ARE WE FULLY UTILIZED?"
-        subtitle="Do we have enough teaching capacity to absorb the growth we are buying?"
+        title="Instructor utilization"
+        tag="Are we fully utilized?"
+        subtitle="Booked hours against available hours this week."
       />
 
-      <Reveal delay={1}>
-        <Panel>
-          <PanelHead
-            title="Organization Capacity"
-            note={unconfigured > 0 ? `${num(unconfigured)} teachers without a capacity set` : null}
-            detailsButton={
-              <DetailsButton
-                title="Instructor Utilization — full details"
-                metric="instructorUtilization"
-                rangeDays={rangeDays}
-                columns={UTILIZATION_COLUMNS}
-              />
-            }
-          />
-          {configured.length && utilization !== null && utilization !== undefined ? (
-            <div className="mt-5">
-              <CapacityMeter pct={utilization}>
-                Total capacity <b className="text-foreground">{num(capacity)} lessons/wk</b> · taught{' '}
-                <b className="text-foreground">{actual.toLocaleString()}</b> · spare{' '}
-                <b className="text-success">{spare.toLocaleString()} lessons/wk</b>
-                <br />
-                Weighted across {num(configured.length)} instructors with a weekly capacity configured.
-              </CapacityMeter>
-            </div>
-          ) : (
-            <NotAvailable
-              message="No instructor has a weekly capacity set."
-              requires="Set a weekly capacity on teachers in Settings → Teachers, and this meter plus every projected-utilization figure on the page starts working."
-              height={140}
-            />
-          )}
-        </Panel>
-      </Reveal>
+      <div className="grid grid-cols-1 gap-[18px] [&>*]:min-w-0 min-[1200px]:grid-cols-[3fr_2fr]">
+        <CardFrame
+          {...frame}
+          title="R-12 Instructor utilization"
+          snapshot="This week"
+          details={(r) => <DetailsButton title="Instructor Utilization — full details" metric="instructorUtilization" rangeDays={r} columns={UTILIZATION_COLUMNS} />}
+        >
+          {(d) => <UtilizationTable rows={d.lessons?.spec?.instructorWeek?.rows || []} />}
+        </CardFrame>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Reveal delay={1}>
-          <Panel className="h-full">
-            <PanelHead
-              title="Utilization by Instructor"
-              note="taught vs weekly capacity"
-              detailsButton={
-                <DetailsButton
-                  title="Instructor Utilization — full details"
-                  metric="instructorUtilization"
-                  rangeDays={rangeDays}
-                  columns={UTILIZATION_COLUMNS}
-                />
-              }
-            />
-            {configured.length ? (
-              <div className="mt-4">
-                <RankedBars
-                  labelWidth={150}
-                  rows={configured.map((t) => ({
-                    label: t.teacher,
-                    value: t.utilizationPct ?? 0,
-                    sublabel: `${t.actualPerWeek} of ${t.weeklyCapacity} per wk${t.studio ? ` · ${t.studio}` : ''}`,
-                  }))}
-                  valueFormatter={(v) => `${Math.round(v)}%`}
-                />
+        <CardFrame {...frame} delay={2} title="R-13 Organization capacity" snapshot="This week">
+          {(d) => {
+            const org = d.lessons?.spec?.instructorWeek?.org
+            return org && org.utilizationPct !== null ? (
+              <div className="my-auto py-4">
+                <CapacityMeter pct={org.utilizationPct}>
+                  {num(org.availableHrs)} available hrs · {num(org.bookedHrs)} booked hrs · {num(org.remainingHrs)} remaining hrs
+                  {org.extraStudentsPerWeek !== null && <> ≈ {num(org.extraStudentsPerWeek)} extra students per week</>}
+                </CapacityMeter>
+                {org.unconfiguredInstructors > 0 && (
+                  <p className="mt-3 text-[12.5px] text-muted-foreground">
+                    {num(org.unconfiguredInstructors)} {org.unconfiguredInstructors === 1 ? 'instructor has' : 'instructors have'} no weekly capacity set and {org.unconfiguredInstructors === 1 ? 'is' : 'are'} not counted here.
+                  </p>
+                )}
               </div>
             ) : (
-              <Empty message="No instructors with a weekly capacity configured." height={200} />
-            )}
-          </Panel>
-        </Reveal>
-
-        <Reveal delay={2}>
-          <Panel className="h-full">
-            <PanelHead title="Teacher Opportunities" note="who to call this week" />
-            <DataTable
-              head={['Instructor', 'Ready to advance', 'Renewals due', 'Pipeline value']}
-              minWidth={520}
-              emptyMessage={all.length ? undefined : 'No instructors in scope.'}
-            >
-              {all.slice(0, 8).map((t) => (
-                <Row key={t.teacher}>
-                  <Cell first>{t.teacher}</Cell>
-                  <Cell>
-                    <Dash />
-                  </Cell>
-                  <Cell>
-                    <Dash />
-                  </Cell>
-                  <Cell>
-                    <Dash />
-                  </Cell>
-                </Row>
-              ))}
-            </DataTable>
-            <Caveat>
-              Instructors are real; the columns are not. Ranking students per teacher by readiness for the next tier,
-              renewals coming due and pipeline value needs the per-student scoring the Priorities section is waiting on.
-            </Caveat>
-          </Panel>
-        </Reveal>
+              <Empty message="No data for this period" height={160} />
+            )
+          }}
+        </CardFrame>
       </div>
     </section>
   )

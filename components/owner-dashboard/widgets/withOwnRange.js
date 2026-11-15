@@ -50,7 +50,7 @@ function useWidgetRange(defaultRange) {
 export function withOwnRange(WidgetComponent, { defaultRangeDays = 30 } = {}) {
   function Wrapped({ defaultRange }) {
     const [rangeDays, onRangeChange] = useWidgetRange(defaultRange ?? defaultRangeDays)
-    const { data, isLoading } = useOwnerDashboardOverview(rangeDays)
+    const { data, isLoading } = useOwnerDashboardOverview(rangeDays, { legacy: true })
 
     if (isLoading && !data) return RANGE_LOADER
 

@@ -445,6 +445,9 @@ function HumanQueuePageContent() {
   const [callbackPage, setCallbackPage] = useState(1)
   const [callbackTotal, setCallbackTotal] = useState(0)
   const callbackFetchGenRef = useRef(0)
+  const queueFetchGenRef = useRef(0)
+  const activeTabRef = useRef(activeTab)
+  activeTabRef.current = activeTab
 
   // -- Agent availability toggling --
   const [togglingAgentId, setTogglingAgentId] = useState(null)
@@ -471,6 +474,8 @@ function HumanQueuePageContent() {
   }, [])
 
   const fetchQueueData = useCallback(async ({ silent = false } = {}) => {
+    const gen = ++queueFetchGenRef.current
+    const requestedTab = activeTab
     try {
       if (!silent) setLoading(true)
       else setRefreshing(true)
@@ -480,18 +485,25 @@ function HumanQueuePageContent() {
         api.get('/api/human-queue/agents'),
         api.get('/api/human-queue/stats'),
       ])
+      if (gen !== queueFetchGenRef.current) return
       const queueResult = results[0]
       const agentsResult = results[1]
       const statsResult = results[2]
+      // Callbacks is a different list. A slow queue response must not replace it
+      // or put this tab's count on a list the user is no longer looking at.
+      const viewingThisTab = activeTabRef.current === requestedTab
 
-      if (queueResult.success) {
+      if (viewingThisTab && queueResult.success) {
         const list = extractList(queueResult)
         setEscalations(list)
         setSelectedEscalationId((current) => {
           if (current && list.some((i) => (i.id || i._id) === current)) return current
           return list[0]?.id || list[0]?._id || null
         })
+      }
 
+      if (queueResult.success) {
+        const list = extractList(queueResult)
         const currentActiveCall = activeCallRef.current
         if (currentActiveCall) {
           const activeId = String(currentActiveCall.id || currentActiveCall._id)
@@ -501,12 +513,14 @@ function HumanQueuePageContent() {
           if (!updated && activeConnectionRef.current) {
             try {
               const detail = await api.get(`/api/human-queue/${activeId}`)
+              if (gen !== queueFetchGenRef.current) return
               if (detail.success && detail.data) updated = detail.data
             } catch {
               // ignore — fall through
             }
           }
 
+          if (gen !== queueFetchGenRef.current) return
           if (updated) {
             const terminal = ['abandoned', 'resolved'].includes(updated.status)
             if (terminal) {
@@ -532,7 +546,7 @@ function HumanQueuePageContent() {
       }
 
       if (agentsResult?.success) applyAgentsPermissionPayload(agentsResult.data)
-      if (statsResult.success && statsResult.data) {
+      if (activeTabRef.current === requestedTab && statsResult.success && statsResult.data) {
         setTabCounts((prev) => ({
           waiting: statsResult.data.waiting ?? statsResult.data.unassigned ?? prev.waiting ?? 0,
           active: statsResult.data.active
@@ -546,6 +560,7 @@ function HumanQueuePageContent() {
     } catch (error) {
       console.error(error)
     } finally {
+      if (gen !== queueFetchGenRef.current) return
       if (!silent) setLoading(false)
       setRefreshing(false)
     }
@@ -576,6 +591,7 @@ function HumanQueuePageContent() {
         api.get('/api/human-queue/agents'),
       ])
       if (gen !== callbackFetchGenRef.current) return
+      if (activeTabRef.current !== 'callbacks') return
 
       if (listResult.success) {
         let total = Number(listResult.data?.total) || 0
@@ -588,6 +604,7 @@ function HumanQueuePageContent() {
           setCallbackPage(lastPage)
           listResult = await api.get(buildUrl(lastPage))
           if (gen !== callbackFetchGenRef.current) return
+          if (activeTabRef.current !== 'callbacks') return
           if (listResult.success) {
             total = Number(listResult.data?.total) || 0
             items = Array.isArray(listResult.data?.items) ? listResult.data.items : []

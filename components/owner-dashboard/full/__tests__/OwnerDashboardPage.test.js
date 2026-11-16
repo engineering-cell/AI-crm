@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { money, moneyShort, num } from '../chrome'
 
 // DetailsButton / LeadsDetailsButton call useRouter(); the page only needs a
@@ -77,6 +77,21 @@ function ownerPayload({
       ],
       totalOutstanding: 8600,
       byCurriculum: [{ tier: 'Bronze I', revenue: 26000 }],
+      spec: {
+        netSales: {
+          total: revenue,
+          byStudio: [{ location: 'Soho', revenue }],
+          byServiceType: [
+            { serviceType: 'Private Lessons', value: revenue, pct: 100, programs: [{ program: 'Starter', value: revenue, pct: 100 }] },
+          ],
+          trend: {
+            monthly: [{ label: 'Nov MTD', partial: true, value: revenue }],
+            quarterly: [{ label: 'Q4 26 QTD', partial: true, value: revenue }],
+            yearly: [{ label: '2026 YTD', partial: true, value: revenue }],
+            monthly12: [{ label: 'Nov MTD', partial: true, value: revenue }],
+          },
+        },
+      },
     },
     lessons: {
       byStudio: [{ location: 'Soho', count: lessons }],
@@ -101,8 +116,42 @@ function ownerPayload({
         { teacherID: 't2', teacher: 'Misha', studio: 'Soho', weeklyCapacity: 40, actualPerWeek: 26, utilizationPct: 65 },
       ],
       byCurriculum: [{ tier: 'Bronze I', count: 1108 }],
+      scheduledThisWeek: { total: 156, confirmedPct: 94.5, byStudio: [{ location: 'Soho', scheduled: 156 }], introsThisWeek: 7, introsRestOfMonth: 12 },
+      spec: {
+        mix: { total: lessons, types: [{ type: 'Private Lessons', count: lessons, pct: 100, programs: [{ program: 'Starter', count: lessons }] }] },
+        monthly6: [{ label: 'Nov MTD', partial: true, value: lessons }],
+        monthly12: [{ label: 'Nov MTD', partial: true, value: lessons }],
+        instructorWeek: {
+          rows: [{ teacher: 'Yuri', studio: 'Soho', availableHrs: 40, bookedHrs: 34, taught: 20, scheduled: 14, capacitySlots: 40, remainingSlots: 6, remainingHrs: 6, utilizationPct: 85 }],
+          org: { availableHrs: 40, bookedHrs: 34, remainingHrs: 6, utilizationPct: 85, avgLessonsPerInstructor: 34, extraStudentsPerWeek: 2 },
+        },
+      },
+    },
+    marketing: {
+      leadTotal: 10,
+      leadsBySource: [{ source: 'Meta', count: 6, pct: 60 }, { source: 'Google', count: 4, pct: 40 }],
+      revenueBySource: [{ source: 'Meta', revenue: 52000 }],
+      channelEconomics: [{ source: 'Meta', leads: 6, leadToIntroPct: 33.3, introToStarterPct: 50, revenue: 600, cpl: null, costPerSale: null, roas: null }],
+      leadDensityByZip: [{ zip: '10013', leads: 4, starters: 1, revenue: 400 }],
+      leadsByStudioSource: [{ location: 'Soho', total: 10, sources: [{ source: 'Meta', count: 6 }, { source: 'Google', count: 4 }] }],
     },
     funnel: {
+      introToStarter: { introsTaught: 20, startersSold: 5, ratePct: 25, avgStarterSale: 400 },
+      spec: {
+        conversionRates: [],
+        reports: {
+          report1: { uniqueLeads: leads, qualified: 90, contacted: 80, booked: 20, bookedPct: 20, avgDaysToBook: 3.4, medianDaysToBook: 2 },
+          report2: { introsBooked: 30, introsTaught: 24, showRatePct: 80, firstPurchases: 12, boughtPct: 50, avgSale: 550, avgCashAtSale: 420, collectionRatePct: 76.4, avgUnits: 3.4, medianDaysToBuy: 6 },
+          report3: { cohort: 12, steps: [
+            { n: 1, label: 'Purchase 1', customers: 12, avgSale: 550, avgCash: 420, collectionRatePct: 76.4, avgUnits: 3.4, ltv: 550, boughtAgainPct: null, medianDaysFromPrev: null, mix: [{ category: 'Core programs', count: 12, pct: 100 }] },
+            { n: 2, label: 'Purchase 2', customers: 6, avgSale: 300, avgCash: 300, collectionRatePct: 100, avgUnits: 2, ltv: 850, boughtAgainPct: 50, medianDaysFromPrev: 21, mix: [{ category: 'Memberships', count: 6, pct: 100 }] },
+          ] },
+          report4: { starterEnrollments: 9, starterPerIntroPct: 37.5, steps: [
+            { label: 'Starter', students: 9, avgSale: 400, avgCash: 300, avgUnits: 8, avgDaysInProgram: 40, ltv: 700, advancedPct: 33.3, maturing: false, paidInFull: 5, paymentPlan: 4 },
+            { label: 'Foundation', students: 3, avgSale: 900, avgCash: 900, avgUnits: 20, avgDaysInProgram: null, ltv: 1500, advancedPct: null, maturing: false, paidInFull: 3, paymentPlan: 0 },
+          ] },
+        },
+      },
       report1: {
         leadCount: leads,
         introBookedCount: introsBooked,
@@ -256,17 +305,19 @@ describe('OwnerDashboardPage', () => {
 
     for (const heading of [
       'Scorecard',
-      'Money',
-      'Teaching Engine',
-      'Forecast',
-      'Utilization',
-      'Funnel Report',
-      'Performance',
-      'Health',
-      'Exceptions',
+      'Where the money comes from',
+      'Lessons',
+      'Lesson forecast',
+      'Instructor utilization',
+      'Conversion funnel',
+      'Marketing performance',
+      'Student health',
     ]) {
-      expect(screen.getByText(heading)).toBeInTheDocument()
+      expect(screen.getAllByText(heading).length).toBeGreaterThan(0)
     }
+    // Spec: the scorecard is K-01 … K-11 and "Priorities & exceptions" is not in this build.
+    expect(document.querySelectorAll('[data-report-id^="K-"]')).toHaveLength(11)
+    expect(screen.queryByText('Operating Exceptions')).not.toBeInTheDocument()
   })
 
   it('shows real headline figures from the payload rather than placeholders', async () => {
@@ -279,7 +330,7 @@ describe('OwnerDashboardPage', () => {
     expect(screen.getAllByText(money(116000)).length).toBeGreaterThan(0)
     expect(screen.getAllByText(num(451)).length).toBeGreaterThan(0)
     expect(screen.getAllByText(num(156)).length).toBeGreaterThan(0)
-    expect(screen.getAllByText('87%').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('87.0%').length).toBeGreaterThan(0)
   })
 
   it('derives MoM badges by comparing the current window with the prior one', async () => {
@@ -288,23 +339,15 @@ describe('OwnerDashboardPage', () => {
     // Revenue 116,000 vs prior 100,000 = +16.0%.
     expect(screen.getAllByText('+16.0%').length).toBeGreaterThan(0)
     // Leads 420 vs prior 500 = -16.0%, i.e. a decline is reported as one.
-    expect(screen.getAllByText('-16.0%').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('−16.0%').length).toBeGreaterThan(0)
   })
 
   it('marks metrics the backend still cannot produce instead of inventing a number', async () => {
     await renderPage()
 
-    expect(screen.getByText(/Needs per-period first-tier enrolments/i)).toBeInTheDocument()
-    expect(screen.getByText(/not split by lesson type/i)).toBeInTheDocument()
-    expect(screen.getByText(/Per-student opportunity ranking is not built yet/i)).toBeInTheDocument()
-  })
-
-  it('shows a real, cohort-consistent show rate instead of omitting it', async () => {
-    await renderPage()
-    // 200 attended of 250 booked = 80%, from report1's own cohort — never a
-    // cross-cohort ratio that could exceed 100%.
-    expect(screen.getByText('Show rate')).toBeInTheDocument()
-    expect(screen.getAllByText('80%').length).toBeGreaterThan(0)
+    // Spec K-07 / K-09 come straight from the backend fields, never a made-up number.
+    expect(document.querySelector('[data-report-id="K-07"]').textContent).toContain('25.0%')
+    expect(document.querySelector('[data-report-id="K-09"]').textContent).toContain('7')
   })
 
   it('never renders an impossible conversion rate even for a skewed cohort', async () => {
@@ -340,34 +383,28 @@ describe('OwnerDashboardPage', () => {
     }
   })
 
-  it('marks first-sale values as lifetime, since they are not window-scoped', async () => {
-    await renderPage()
-    expect(screen.getByText('Avg 1st sale · lifetime')).toBeInTheDocument()
-  })
-
   it('renders every panel the concept has, including the ones still with no data source', async () => {
     await renderPage()
 
-    for (const title of [
-      'Revenue vs Goal',
-      'Outstanding Balances',
-      'Potential Revenue Opportunities',
-      'Lessons Taught by Teacher',
-      'Lessons vs Goal',
-      'Scheduled by Instructor',
-      'Teacher Opportunities',
-      'Channel Economics',
-      'Lead Density by ZIP',
-      'Revenue by Source',
-      'Student Opportunities',
-      'Operating Exceptions',
-    ]) {
-      expect(screen.getByText(title)).toBeInTheDocument()
+    // IDs are an overlay (spec: "Show report IDs"), hidden by default.
+    expect(document.querySelector('[data-rid]')).toBeNull()
+    fireEvent.click(screen.getByText('Show report IDs'))
+    const expected = [
+      ...Array.from({ length: 11 }, (_, i) => `K-${String(i + 1).padStart(2, '0')}`),
+      ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25].map((n) => `R-${String(n).padStart(2, '0')}`),
+    ]
+    for (const id of expected) {
+      expect(document.querySelector(`[data-rid="${id}"]`), id).not.toBeNull()
     }
+    // R-22 / R-23 carry the purple Phase 2 tag; ad-spend columns are dashes until spend exists.
+    expect(screen.getAllByText('PHASE 2')).toHaveLength(2)
+    expect(screen.getByText('10013')).toBeInTheDocument()
+    // Card titles read without the ID prefix.
+    expect(screen.getByText('Revenue by studio')).toBeInTheDocument()
+    expect(screen.getByText('Outstanding balances')).toBeInTheDocument()
 
-    // Column headers — real (Attainment, Remaining/wk, Projected, Starters)
-    // alongside ones still genuinely unbacked (ROAS, Renewals due).
-    for (const column of ['Attainment', 'Remaining/wk', 'Projected', 'Starters', 'ROAS', 'Renewals due']) {
+    // Spec column headers.
+    for (const column of ['Remaining slots', 'Projected utilization', 'Available hrs', 'Booked hrs', 'Avg per week']) {
       expect(screen.getAllByText(column).length).toBeGreaterThan(0)
     }
   })
@@ -379,23 +416,46 @@ describe('OwnerDashboardPage', () => {
     expect(screen.getAllByText('Soho').length).toBeGreaterThan(0)
 
     // Ageing buckets with real amounts, not a dash.
-    expect(screen.getByText('Ageing')).toBeInTheDocument()
-    expect(screen.getByText('0–30 days')).toBeInTheDocument()
-
-    // Real first-purchase product-mix categories from the backend, not the
-    // concept's invented "Core programs" placeholder.
-    expect(screen.getByText('First Purchase · Product Mix')).toBeInTheDocument()
-    expect(screen.getByText('Curriculum Package')).toBeInTheDocument()
+    expect(screen.getByText('Aging')).toBeInTheDocument()
+    expect(screen.getByText('0–30 days')).toBeInTheDocument() // falls back to package balances when outstandingPlans is absent
 
     // Forecast by instructor now has a real studio + scheduled + capacity row.
     expect(screen.getAllByText('Yuri').length).toBeGreaterThan(0)
 
-    // Revenue by Source and Lead Density by ZIP from the classic overview.
+    // Revenue by source (first-touch) from the backend.
     expect(screen.getAllByText(moneyShort(52000)).length).toBeGreaterThan(0)
-    expect(screen.getByText('10013')).toBeInTheDocument()
 
-    // A real operating exception, not "not built yet".
-    expect(screen.getByText(/only 42% of 245 active students are booked/)).toBeInTheDocument()
+  })
+
+  it('renders the four funnel reports from the spec formulas', async () => {
+    await renderPage()
+    expect(screen.getAllByText('Lead → Intro').length).toBeGreaterThan(0)
+    expect(screen.getByText('Median time to book')).toBeInTheDocument()
+    expect(screen.getAllByText('Intro → First purchase').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Cash at sale').length).toBeGreaterThan(0)
+    expect(screen.getByText('Purchase journey')).toBeInTheDocument()
+    expect(screen.getByText('Classic curriculum funnel')).toBeInTheDocument()
+    expect(screen.getAllByText('37.5%').length).toBeGreaterThan(0)
+  })
+
+  it("lets one card override the page period without touching the others", async () => {
+    await renderPage()
+    overview.mockClear()
+    fireEvent.change(screen.getByLabelText('R-05 Lessons taught by studio period'), { target: { value: 'ytd' } })
+    // The overridden card reads its own period (plus its MoM / YoY windows); the page period stays 'mtd'.
+    expect(overview.mock.calls.some(([range]) => range === 'ytd')).toBe(true)
+    expect(screen.getByLabelText('R-01 Revenue by studio period').value).toBe('page')
+  })
+
+  it('shows the studio rank in single-studio view', async () => {
+    overview.mockImplementation(() => ({
+      data: { ...CURRENT, revenue: { ...CURRENT.revenue, spec: { netSales: { ...CURRENT.revenue.spec.netSales, rank: { position: 5, of: 13 } } } } },
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    }))
+    await renderPage()
+    expect(screen.getByText((_, el) => el?.tagName === 'SPAN' && el.textContent === '#5 of 13')).toBeInTheDocument()
   })
 
   it('keeps a Details drill-down on the data panels', async () => {
@@ -416,10 +476,10 @@ describe('OwnerDashboardPage', () => {
 
     await renderPage()
 
-    expect(screen.queryByText('Money')).not.toBeInTheDocument()
+    expect(screen.queryByText('Where the money comes from')).not.toBeInTheDocument()
     const nav = screen.getByRole('navigation')
-    expect(within(nav).queryByText('REVENUE')).not.toBeInTheDocument()
+    expect(within(nav).queryByText('Revenue')).not.toBeInTheDocument()
     // Sections the user still has stay put.
-    expect(within(nav).getByText('LESSONS')).toBeInTheDocument()
+    expect(within(nav).getByText('Lessons')).toBeInTheDocument()
   })
 })

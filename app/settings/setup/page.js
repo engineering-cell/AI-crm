@@ -134,7 +134,7 @@ function DragHandle(props) {
   )
 }
 
-function SortableServiceRow({ service, selectedIds, toggleOne, onEdit, onDelete, onToggleStatus, onToggleMemberships }) {
+function SortableServiceRow({ service, selectedIds, toggleOne, onEdit, onDuplicate, onDelete, onToggleStatus, onToggleMemberships }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: service._id })
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }
 
@@ -193,6 +193,7 @@ function SortableServiceRow({ service, selectedIds, toggleOne, onEdit, onDelete,
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => onEdit(service)}>Edit</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onDuplicate(service)}>Duplicate</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onToggleStatus(service)}>{service.isActive ? 'Deactivate' : 'Activate'}</DropdownMenuItem>
             <DropdownMenuItem className="text-destructive" onClick={() => onDelete(service)}>Delete</DropdownMenuItem>
           </DropdownMenuContent>
@@ -267,6 +268,7 @@ function ServicesTab() {
   const [selectedIds, setSelectedIds] = useState([])
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingService, setEditingService] = useState(null)
+  const [duplicatingService, setDuplicatingService] = useState(false)
 
   const [pageSize, setPageSize] = useState(persisted.pageSize || ROWS_PER_PAGE)
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
@@ -398,7 +400,7 @@ function ServicesTab() {
           </span>
           <Button
             className="h-9 px-4 rounded-lg bg-brand hover:bg-brand-dark text-brand-foreground text-sm font-medium gap-2 shrink-0"
-            onClick={() => { setEditingService(null); setDialogOpen(true) }}
+            onClick={() => { setDuplicatingService(false); setEditingService(null); setDialogOpen(true) }}
           >
             <Plus className="h-4 w-4" />
             Add Service
@@ -442,7 +444,8 @@ function ServicesTab() {
                       service={service}
                       selectedIds={selectedIds}
                       toggleOne={toggleOne}
-                      onEdit={(s) => { setEditingService(s); setDialogOpen(true) }}
+                      onEdit={(s) => { setDuplicatingService(false); setEditingService(s); setDialogOpen(true) }}
+                      onDuplicate={(s) => { setDuplicatingService(true); setEditingService(s); setDialogOpen(true) }}
                       onDelete={handleDelete}
                       onToggleStatus={handleToggleStatus}
                       onToggleMemberships={handleToggleMemberships}
@@ -463,7 +466,7 @@ function ServicesTab() {
         />
       </div>
 
-      <ServiceDialog open={dialogOpen} onClose={() => setDialogOpen(false)} service={editingService} defaultType={serviceType} onRefresh={() => loadServices(currentPage, searchQuery, serviceType)} />
+      <ServiceDialog open={dialogOpen} onClose={() => setDialogOpen(false)} service={editingService} duplicate={duplicatingService} defaultType={serviceType} onRefresh={() => loadServices(currentPage, searchQuery, serviceType)} />
     </div>
   )
 }

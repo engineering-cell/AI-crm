@@ -83,19 +83,19 @@ function SectionNav({ sections }) {
   // doesn't, so no entry is ever hidden.
   return (
     <nav
-      className="sticky top-0 z-40 -mx-3 border-b border-border bg-background px-3 py-2.5 shadow-[0_4px_12px_-8px_rgb(0_0_0/0.35)] sm:-mx-4 sm:px-4 lg:-mx-2 lg:px-2
-        before:absolute before:inset-x-0 before:bottom-full before:h-6 before:bg-background before:content-['']"
+      className="sticky top-0 z-40 -mx-3 bg-background px-3 pb-3 pt-1 sm:-mx-4 sm:px-4 lg:-mx-2 lg:px-2
+        before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-background before:content-['']"
     >
-      <div className="flex flex-wrap gap-1.5">
+      <div className="inline-flex max-w-full flex-wrap gap-1 rounded-2xl border border-border bg-card p-1 shadow-sm">
         {sections.map((s) => (
           <a
             key={s.id}
             href={`#${s.id}`}
             onClick={(e) => jumpTo(e, s.id)}
-            className={`shrink-0 whitespace-nowrap rounded-full border px-3.5 py-1.5 text-[12.5px] font-semibold transition-colors ${
+            className={`shrink-0 whitespace-nowrap rounded-xl px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
               active === s.id
-                ? 'border-[var(--studio-primary)] bg-[var(--studio-primary)] text-brand-foreground'
-                : 'border-transparent text-muted-foreground hover:border-[color-mix(in_srgb,var(--studio-primary)_30%,transparent)] hover:text-foreground'
+                ? 'bg-[var(--studio-primary)] text-brand-foreground shadow-sm'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
             }`}
           >
             {s.label}
@@ -147,16 +147,9 @@ export default function OwnerDashboardPage() {
   return (
     <ReportIdsContext.Provider value={showIds}>
     <div className="pb-20">
-      <header className="flex flex-wrap items-end justify-between gap-4 pb-9 pt-1">
+      <header className="flex flex-wrap items-end justify-between gap-4 pb-6 pt-2">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
-            Organization owner · {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-            {data?.studentHealth?.perStudio ? ` · ${data.studentHealth.perStudio.length} studios` : ''}
-          </p>
           <h1 className="text-[24px] font-extrabold leading-tight text-foreground">Studio performance</h1>
-          <p className="text-[12.5px] text-muted-foreground">
-            Every card drills down the same way: Organization → Studio → Instructor → Customer.
-          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
           {isValidating && <span className="text-[11px] text-muted-foreground">Updating…</span>}

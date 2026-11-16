@@ -71,14 +71,9 @@ export function useReveal() {
   return [ref, shown]
 }
 
-export function Reveal({ children, delay = 0, className = '' }) {
-  const [ref, shown] = useReveal()
-  const delayClass = delay ? `od-reveal-d${delay}` : ''
-  return (
-    <div ref={ref} className={`od-reveal ${delayClass} ${shown ? 'od-in' : ''} ${className}`.trim()}>
-      {children}
-    </div>
-  )
+/** Layout wrapper only. The design allows one animation — bars growing once on first load — so no fade or slide-in. */
+export function Reveal({ children, className = '' }) {
+  return <div className={className.trim()}>{children}</div>
 }
 
 /* ── type ───────────────────────────────────────────────────────────────── */
@@ -129,6 +124,24 @@ export function SectionHead({ number, title, tag, subtitle }) {
   )
 }
 
+/**
+ * Supporting lines in the design set their numbers in bold ink against grey text
+ * ("<b>34</b> active payment plans"). Wraps every figure in a string — $1,152, 78.5%, 954 — that way.
+ */
+export function Emph({ children }) {
+  if (typeof children !== 'string') return children
+  const parts = children.split(/(\$?\d[\d,]*(?:\.\d+)?(?:%| pp|K|M)?)/g)
+  return parts.map((part, i) =>
+    i % 2 ? (
+      <b key={i} className="font-semibold text-foreground">
+        {part}
+      </b>
+    ) : (
+      part
+    )
+  )
+}
+
 /* ── comparison badges ──────────────────────────────────────────────────── */
 
 /**
@@ -173,15 +186,20 @@ export function Panel({ children, className = '' }) {
 }
 
 /** The concept's card title row: label left, note + controls right. */
-export function PanelHead({ title, note, right, detailsButton }) {
+export function PanelHead({ title, note, right, detailsButton, tag }) {
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-2">
       <h3 className="flex items-center gap-2 text-[15px] font-extrabold uppercase text-[var(--studio-primary-dark,#7E0F47)]">
         <IdBadge id={title.match(/^R-\d+/)?.[0]} />
         {title.replace(/^R-\d+\s+/, '')}
+        {tag && <span className="rounded-full bg-[#9D85E8] px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] text-white">{tag}</span>}
       </h3>
       <div className="flex flex-wrap items-center gap-2">
-        {note && <span className="text-[10px] normal-case tracking-normal text-muted-foreground">{note}</span>}
+        {note && (
+          <span className="text-[10px] normal-case tracking-normal text-muted-foreground">
+            <Emph>{note}</Emph>
+          </span>
+        )}
         {right}
         {detailsButton}
       </div>

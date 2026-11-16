@@ -68,6 +68,7 @@ export function RankedBars({
         return (
           <div
             key={`${r.label}-${i}`}
+            title={`${r.label}: ${Number(r.value).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
             className="grid items-center gap-3 py-[7px]"
             style={{ gridTemplateColumns: `minmax(0,${labelWidth}px) 1fr 78px` }}
           >

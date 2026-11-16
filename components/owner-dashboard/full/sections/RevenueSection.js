@@ -4,7 +4,7 @@ import { useState } from 'react'
 import DonutChart from '@/components/dashboard/widgets/DonutChart'
 import DetailsButton from '@/components/owner-dashboard/widgets/DetailsButton'
 import CardFrame from '../CardFrame'
-import { Empty, SectionHead, Segmented, moneyShort, num } from '../chrome'
+import { Emph, Empty, SectionHead, Segmented, moneyShort, num } from '../chrome'
 import { DrillAccordion, Fill, MixBars, RankedBars, TrendArea } from '../viz'
 import { formatDate } from '@/lib/utils'
 
@@ -146,10 +146,15 @@ export default function RevenueSection({ data, comparisons, rangeDays }) {
               <p className="mt-3 text-[30px] font-bold leading-none tabular-nums text-[var(--studio-primary)]">
                 {moneyShort(plans?.total ?? revenue?.totalOutstanding ?? 0)}
               </p>
-              <p className="mb-3 mt-1 text-[12.5px] text-muted-foreground">
-                {plans
-                  ? `${num(plans.activePlans)} active ${plans.activePlans === 1 ? 'plan' : 'plans'} · ${num(plans.overduePlans)} overdue`
-                  : `across ${num(outstanding.length)} ${outstanding.length === 1 ? 'studio' : 'studios'}`}
+              <p className="mb-3 mt-1 text-[13px] text-muted-foreground">
+                {plans ? (
+                  <>
+                    <b className="font-semibold text-foreground">{num(plans.activePlans)}</b> active {plans.activePlans === 1 ? 'plan' : 'plans'} ·{' '}
+                    <b className="font-semibold text-[#C13049]">{num(plans.overduePlans)} overdue</b>
+                  </>
+                ) : (
+                  <Emph>{`across ${num(outstanding.length)} ${outstanding.length === 1 ? 'studio' : 'studios'}`}</Emph>
+                )}
               </p>
               {ageing.length ? (
                 <MixBars

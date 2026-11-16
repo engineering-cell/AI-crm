@@ -93,8 +93,9 @@ function StatusGroup({ value, onChange }) {
   );
 }
 
-export default function ServiceDialog({ open, onClose, service, onRefresh, defaultType }) {
-  const isEdit = Boolean(service);
+export default function ServiceDialog({ open, onClose, service, onRefresh, defaultType, duplicate = false }) {
+  // Duplicating prefills from `service` but saves as a brand-new service.
+  const isEdit = Boolean(service) && !duplicate;
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
@@ -104,7 +105,8 @@ export default function ServiceDialog({ open, onClose, service, onRefresh, defau
       setForm({
         serviceName: service.serviceName || "",
         serviceCode: service.serviceCode || "",
-        locationID: Array.isArray(service.locationID)
+        // A duplicate is meant for another studio, so the location starts empty.
+        locationID: duplicate ? [] : Array.isArray(service.locationID)
           ? service.locationID.map((l) => l?._id ?? l).filter(Boolean)
           : service.locationID?._id
             ? [service.locationID._id]
@@ -128,7 +130,7 @@ export default function ServiceDialog({ open, onClose, service, onRefresh, defau
           : "private";
       setForm({ ...EMPTY_FORM, type });
     }
-  }, [open, service, defaultType]);
+  }, [open, service, defaultType, duplicate]);
 
   function set(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -183,7 +185,7 @@ export default function ServiceDialog({ open, onClose, service, onRefresh, defau
         : await api.post("/api/calendar-service", payload);
 
       if (result.success) {
-        toast.success(isEdit ? "Service updated" : "Service created");
+        toast.success(isEdit ? "Service updated" : duplicate ? "Service duplicated" : "Service created");
         onRefresh();
         onClose();
       } else {
@@ -198,7 +200,7 @@ export default function ServiceDialog({ open, onClose, service, onRefresh, defau
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit Service" : "Add Service"}</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit Service" : duplicate && service ? "Duplicate Service" : "Add Service"}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="py-2">

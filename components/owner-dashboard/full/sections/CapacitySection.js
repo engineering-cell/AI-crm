@@ -2,7 +2,7 @@
 
 import DetailsButton from '@/components/owner-dashboard/widgets/DetailsButton'
 import CardFrame from '../CardFrame'
-import { Dash, Empty, SectionHead, num } from '../chrome'
+import { Dash, Emph, Empty, SectionHead, num } from '../chrome'
 import { CapacityMeter, Cell, DataTable, Row } from '../viz'
 import { formatDate } from '@/lib/utils'
 import { useCollapsedRows, utilTone } from './ForecastSection'
@@ -74,12 +74,12 @@ export default function CapacitySection({ data, comparisons, rangeDays }) {
             return org && org.utilizationPct !== null ? (
               <div className="my-auto py-4">
                 <CapacityMeter pct={org.utilizationPct}>
-                  {num(org.availableHrs)} available hrs · {num(org.bookedHrs)} booked hrs · {num(org.remainingHrs)} remaining hrs
-                  {org.extraStudentsPerWeek !== null && <> ≈ {num(org.extraStudentsPerWeek)} extra students per week</>}
+                  <Emph>{`${num(org.availableHrs)} available hrs · ${num(org.bookedHrs)} booked hrs · ${num(org.remainingHrs)} remaining hrs`}</Emph>
+                  {org.extraStudentsPerWeek !== null && <Emph>{` ≈ ${num(org.extraStudentsPerWeek)} extra students per week`}</Emph>}
                 </CapacityMeter>
                 {org.unconfiguredInstructors > 0 && (
                   <p className="mt-3 text-[12.5px] text-muted-foreground">
-                    {num(org.unconfiguredInstructors)} {org.unconfiguredInstructors === 1 ? 'instructor has' : 'instructors have'} no weekly capacity set and {org.unconfiguredInstructors === 1 ? 'is' : 'are'} not counted here.
+                    <Emph>{`${num(org.unconfiguredInstructors)} ${org.unconfiguredInstructors === 1 ? 'instructor has' : 'instructors have'} no weekly capacity set and ${org.unconfiguredInstructors === 1 ? 'is' : 'are'} not counted here.`}</Emph>
                   </p>
                 )}
               </div>

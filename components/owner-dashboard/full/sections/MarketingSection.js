@@ -4,8 +4,8 @@ import DonutChart from '@/components/dashboard/widgets/DonutChart'
 import LeadsDetailsButton from '@/components/owner-dashboard/widgets/LeadsDetailsButton'
 import { formatFieldDisplayValue } from '@/lib/dynamic-list-normalize'
 import CardFrame from '../CardFrame'
-import { Empty, Legend, SectionHead, moneyShort, num } from '../chrome'
-import { RankedBars } from '../viz'
+import { Dash, Empty, Legend, SectionHead, moneyShort, num } from '../chrome'
+import { Cell, DataTable, RankedBars, Row } from '../viz'
 import { formatDate } from '@/lib/utils'
 
 const LEAD_COLUMNS = [
@@ -97,6 +97,53 @@ function LeadsByStudio({ d }) {
   )
 }
 
+const pct1 = (v) => `${Number(v).toFixed(1)}%`
+
+/** R-22 (phase 2): ad-spend columns stay empty until spend is imported or entered. */
+function ChannelEconomics({ d }) {
+  const rows = d.marketing?.channelEconomics || []
+  return rows.length ? (
+    <>
+      <DataTable head={['Source', 'Leads', 'L→I %', 'I→S %', 'Revenue', 'CPL', 'Cost per sale', 'ROAS']} minWidth={640}>
+        {rows.map((r) => (
+          <Row key={r.source}>
+            <Cell first>{r.source}</Cell>
+            <Cell>{num(r.leads)}</Cell>
+            <Cell>{pct1(r.leadToIntroPct)}</Cell>
+            <Cell>{pct1(r.introToStarterPct)}</Cell>
+            <Cell tone="text-[var(--studio-primary)] font-bold">{moneyShort(r.revenue)}</Cell>
+            <Cell>{r.cpl === null ? <Dash /> : `$${r.cpl}`}</Cell>
+            <Cell>{r.costPerSale === null ? <Dash /> : `$${r.costPerSale}`}</Cell>
+            <Cell>{r.roas === null ? <Dash /> : `${r.roas}×`}</Cell>
+          </Row>
+        ))}
+      </DataTable>
+      <p className="mt-3 text-[12.5px] text-muted-foreground">CPL, cost per sale and ROAS need monthly ad spend per platform per studio (import from Meta and Google Ads, or manual entry).</p>
+    </>
+  ) : (
+    <Empty message="No data for this period" height={160} />
+  )
+}
+
+/** R-23 (phase 2): top ZIP codes from the ZIP on each lead. */
+function LeadDensityByZip({ d }) {
+  const rows = d.marketing?.leadDensityByZip || []
+  return rows.length ? (
+    <DataTable head={['ZIP', 'Leads', 'Starters', 'Revenue']} minWidth={380}>
+      {rows.map((r) => (
+        <Row key={r.zip}>
+          <Cell first>{r.zip}</Cell>
+          <Cell>{num(r.leads)}</Cell>
+          <Cell>{num(r.starters)}</Cell>
+          <Cell tone="text-[var(--studio-primary)] font-bold">{moneyShort(r.revenue)}</Cell>
+        </Row>
+      ))}
+    </DataTable>
+  ) : (
+    <Empty message="No ZIP codes on leads for this period" height={160} />
+  )
+}
+
 export default function MarketingSection({ data, comparisons, rangeDays }) {
   const frame = { data, comparisons, pageRange: rangeDays }
   return (
@@ -120,6 +167,15 @@ export default function MarketingSection({ data, comparisons, rangeDays }) {
       <div className="mt-[18px]">
         <CardFrame {...frame} title="R-21 Leads by studio & source" className="">
           {(d) => <LeadsByStudio d={d} />}
+        </CardFrame>
+      </div>
+
+      <div className="mt-[18px] grid grid-cols-1 gap-[18px] [&>*]:min-w-0 min-[1200px]:grid-cols-[3fr_2fr]">
+        <CardFrame {...frame} title="R-22 Channel economics" tag="PHASE 2">
+          {(d) => <ChannelEconomics d={d} />}
+        </CardFrame>
+        <CardFrame {...frame} title="R-23 Lead density by ZIP" tag="PHASE 2">
+          {(d) => <LeadDensityByZip d={d} />}
         </CardFrame>
       </div>
     </section>

@@ -131,6 +131,8 @@ function ownerPayload({
       leadTotal: 10,
       leadsBySource: [{ source: 'Meta', count: 6, pct: 60 }, { source: 'Google', count: 4, pct: 40 }],
       revenueBySource: [{ source: 'Meta', revenue: 52000 }],
+      channelEconomics: [{ source: 'Meta', leads: 6, leadToIntroPct: 33.3, introToStarterPct: 50, revenue: 600, cpl: null, costPerSale: null, roas: null }],
+      leadDensityByZip: [{ zip: '10013', leads: 4, starters: 1, revenue: 400 }],
       leadsByStudioSource: [{ location: 'Soho', total: 10, sources: [{ source: 'Meta', count: 6 }, { source: 'Google', count: 4 }] }],
     },
     funnel: {
@@ -389,11 +391,14 @@ describe('OwnerDashboardPage', () => {
     fireEvent.click(screen.getByText('Show report IDs'))
     const expected = [
       ...Array.from({ length: 11 }, (_, i) => `K-${String(i + 1).padStart(2, '0')}`),
-      ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 24, 25].map((n) => `R-${String(n).padStart(2, '0')}`),
+      ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25].map((n) => `R-${String(n).padStart(2, '0')}`),
     ]
     for (const id of expected) {
       expect(document.querySelector(`[data-rid="${id}"]`), id).not.toBeNull()
     }
+    // R-22 / R-23 carry the purple Phase 2 tag; ad-spend columns are dashes until spend exists.
+    expect(screen.getAllByText('PHASE 2')).toHaveLength(2)
+    expect(screen.getByText('10013')).toBeInTheDocument()
     // Card titles read without the ID prefix.
     expect(screen.getByText('Revenue by studio')).toBeInTheDocument()
     expect(screen.getByText('Outstanding balances')).toBeInTheDocument()
@@ -450,7 +455,7 @@ describe('OwnerDashboardPage', () => {
       mutate: vi.fn(),
     }))
     await renderPage()
-    expect(screen.getByText('#5 of 13')).toBeInTheDocument()
+    expect(screen.getByText((_, el) => el?.tagName === 'SPAN' && el.textContent === '#5 of 13')).toBeInTheDocument()
   })
 
   it('keeps a Details drill-down on the data panels', async () => {

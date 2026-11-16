@@ -2,7 +2,7 @@
 
 import { BadgeDollarSign, CalendarCheck, CalendarClock, Gauge, GraduationCap, ShoppingBag, Sparkles, Target, UserPlus, Users, Rocket } from 'lucide-react'
 import { delta, pointDelta } from '@/lib/hooks/useOwnerDashboardPage'
-import { DeltaPill, IdBadge, SectionHead, money, num, pct1 } from '../chrome'
+import { DeltaPill, Emph, IdBadge, SectionHead, money, num, pct1 } from '../chrome'
 
 /**
  * K-01 … K-11, in the order and with the labels of the Owner Dashboard spec.
@@ -138,7 +138,11 @@ function KpiCard({ card }) {
         <DeltaPill d={card.mom} label="MoM" />
         <DeltaPill d={card.yoy} label="YoY" />
       </div>
-      {card.note && <p className="mt-2.5 text-[12.5px] leading-snug text-muted-foreground">{card.note}</p>}
+      {card.note && (
+        <p className="mt-2.5 text-[12.5px] leading-snug text-muted-foreground">
+          <Emph>{card.note}</Emph>
+        </p>
+      )}
     </a>
   )
 }

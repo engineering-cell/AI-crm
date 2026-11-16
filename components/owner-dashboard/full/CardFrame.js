@@ -73,6 +73,7 @@ export default function CardFrame({
   pageRange,
   snapshot,
   toggle,
+  tag,
   details,
   className = '',
   delay = 1,
@@ -87,7 +88,7 @@ export default function CardFrame({
   return (
     <Reveal delay={delay} className="h-full min-w-0">
       <Panel className={`flex h-full flex-col ${className}`}>
-        <PanelHead title={title} note={note} right={toggle} detailsButton={<>{details ? details(range) : null}{picker}</>} />
+        <PanelHead tag={tag} title={title} note={note} right={toggle} detailsButton={<>{details ? details(range) : null}{picker}</>} />
         {card.loading ? (
           <Skeleton height={140} />
         ) : card.error ? (

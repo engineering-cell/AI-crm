@@ -11,13 +11,14 @@ import { isAdmin } from '@/lib/permissions'
 import { hasPermission } from '@/lib/permissions'
 import { useDashboardOverview, useOwnerDashboardOverview } from '@/lib/hooks/useAnalyticsOverview'
 import { Button } from '@/components/ui/button'
+import OwnerDashboardPage from '@/components/owner-dashboard/full/OwnerDashboardPage'
 
 // One dashboard page: the customizable widget grid. Everything the old
 // sectioned "board meeting" page showed now lives here as widgets — including
 // the Executive Scorecard and Operating Exceptions, ported into the widget
 // design (see components/owner-dashboard/widgets/registry.js). Each widget is
 // still permission-gated; there's no single blanket dashboard permission.
-export default function Dashboard() {
+function WidgetDashboard() {
   const admin = isAdmin()
 
   const visibleOwnerWidgets = ownerDashboardWidgetRegistry.filter(
@@ -103,4 +104,23 @@ export default function Dashboard() {
       )}
     </MainLayout>
   )
+}
+
+/**
+ * Owner Dashboard (build spec v3): anyone who can read at least one owner-overview
+ * section gets the sectioned page — scorecard, eight sections, drill-downs.
+ * Roles without those permissions keep the customizable widget grid.
+ */
+export default function Dashboard() {
+  const canSeeOwnerDashboard = ownerDashboardWidgetRegistry.some(
+    (w) => !w.permission || hasPermission(w.permission.category, w.permission.module, 'read')
+  )
+  if (canSeeOwnerDashboard) {
+    return (
+      <MainLayout title="Dashboard" subtitle="">
+        <OwnerDashboardPage />
+      </MainLayout>
+    )
+  }
+  return <WidgetDashboard />
 }

@@ -1,10 +1,9 @@
 'use client'
 
-import { useMemo } from 'react'
 import DetailsButton from '@/components/owner-dashboard/widgets/DetailsButton'
-import { Empty, Legend, NotAvailable, Panel, PanelHead, Reveal, SectionHead, num } from '../chrome'
-import { Cell, DataTable, GoalBar, Row, StackedCompare } from '../viz'
-import { formatDate } from '@/lib/utils'
+import CardFrame from '../CardFrame'
+import { Empty, Legend, SectionHead, num } from '../chrome'
+import { Cell, DataTable, Row, StackedCompare } from '../viz'
 
 const STUDENT_COLUMNS = [
   { key: 'name', label: 'Name' },
@@ -12,15 +11,6 @@ const STUDENT_COLUMNS = [
   { key: 'phoneNumber', label: 'Phone' },
   { key: 'studio', label: 'Studio' },
   { key: 'booked', label: 'Booked' },
-]
-
-const GOAL_COLUMNS = [
-  { key: 'category', label: 'Category' },
-  { key: 'date', label: 'Date', format: (v) => formatDate(v) || '—' },
-  { key: 'label', label: 'Detail' },
-  { key: 'name', label: 'Name' },
-  { key: 'studio', label: 'Studio' },
-  { key: 'value', label: 'Value', format: (v) => num(v) },
 ]
 
 const BOOKED_COLOR = 'var(--studio-primary)'
@@ -43,180 +33,96 @@ function GrowthCell({ current, index }) {
   return (
     <Cell tone={`${up ? 'text-success' : 'text-destructive'} font-bold`}>
       {up ? '+' : ''}
-      {value.toFixed(1)}%
+      {value.toFixed(1).replace('-', '−')}%
     </Cell>
   )
 }
 
+const bySize = (health) => [...(health?.perStudio || [])].sort((a, b) => b.active - a.active)
+
+/** Spec colours for booked %: 80%+ green · 65–79% orange · under 65% red. */
+const bookedTone = (pct) => (pct >= 80 ? 'text-[#1C8553]' : pct >= 65 ? 'text-[#C2571A]' : 'text-[#C13049]')
+
 export default function StudentHealthSection({ data, comparisons, rangeDays }) {
-  const health = data?.studentHealth
-  const totals = health?.totals
-  const perStudio = useMemo(
-    () => [...(health?.perStudio || [])].sort((a, b) => b.active - a.active),
-    [health]
-  )
-
-  const prevIndex = useMemo(() => engagementIndex(comparisons?.previous), [comparisons])
-  const lyIndex = useMemo(() => engagementIndex(comparisons?.lastYear), [comparisons])
-
-  const newStudentGoal = (data?.goals?.metrics || []).find((m) => m.metric === 'newActiveStudents')
+  const frame = { data, comparisons, pageRange: rangeDays }
+  const totals = data?.studentHealth?.totals
 
   return (
-    <section id="od-health" className="mt-24 scroll-mt-32">
+    <section id="od-health" className="mt-[26px] scroll-mt-32">
       <SectionHead
         number="08"
-        title="Student"
-        emphasis="Health"
-        tag="Q5 · ARE STUDENTS ENGAGED?"
-        subtitle="The strongest early warning of churn — before it shows up in revenue."
+        title="Student health"
+        tag="Are students engaged?"
+        subtitle="Who is booked, and who needs a call."
       />
 
-      <Reveal delay={1}>
-        <Panel>
-          <PanelHead
-            title="Active Students: Booked vs Not Booked"
-            note={
-              totals
-                ? `${num(totals.booked)} booked + ${num(totals.notBooked)} not booked = ${num(totals.active)} active`
-                : null
-            }
-            detailsButton={
-              <DetailsButton
-                title="Active Students — full details"
-                metric="studentHealth"
-                rangeDays={rangeDays}
-                columns={STUDENT_COLUMNS}
-              />
-            }
-          />
-          {perStudio.length ? (
-            <>
-              <div className="mt-3">
-                <Legend
-                  items={[
-                    { label: 'Booked', color: BOOKED_COLOR },
-                    { label: 'Not booked', color: NOT_BOOKED_COLOR },
-                  ]}
-                />
-              </div>
-              <div className="mt-3">
-                <StackedCompare
-                  aColor={BOOKED_COLOR}
-                  bColor={NOT_BOOKED_COLOR}
-                  rows={perStudio.map((r) => ({
-                    label: r.location,
-                    sublabel: `${num(r.booked)} of ${num(r.active)} booked`,
-                    a: r.booked,
-                    b: r.notBooked,
-                    valueLabel: `${r.bookedPct}%`,
-                    valueTone:
-                      r.bookedPct >= 80
-                        ? 'text-success'
-                        : r.bookedPct >= 65
-                          ? 'text-warning'
-                          : 'text-destructive',
-                  }))}
-                />
-              </div>
-            </>
-          ) : (
-            <Empty message="No active students in this period." height={200} />
-          )}
-        </Panel>
-      </Reveal>
-
-      <Reveal className="mt-4">
-        <Panel>
-          <PanelHead
-            title="Lessons per Active Student"
-            note="weekly pace & month-to-date engagement"
-            detailsButton={
-              <DetailsButton
-                title="Active Students — full details"
-                metric="studentHealth"
-                rangeDays={rangeDays}
-                columns={STUDENT_COLUMNS}
-              />
-            }
-          />
-          {perStudio.length ? (
-            <DataTable head={['Studio', 'Avg / Week', 'Avg MTD', 'MoM Growth', 'YoY Growth']} minWidth={560}>
-              {perStudio.map((r, i) => (
-                <Row key={r.location}>
-                  <Cell first tone={i === 0 ? 'text-[var(--studio-primary)]' : 'text-foreground'}>
-                    {r.location}
-                  </Cell>
-                  <Cell tone="text-[var(--studio-primary)] font-bold">
-                    {Number(r.avgLessonsPerActiveStudentPerWeek).toFixed(1)}
-                  </Cell>
-                  <Cell>{Number(r.avgLessonsMTD).toFixed(1)}</Cell>
-                  <GrowthCell current={r} index={prevIndex} />
-                  <GrowthCell current={r} index={lyIndex} />
-                </Row>
-              ))}
-            </DataTable>
-          ) : (
-            <Empty message="No active students in this period." height={160} />
-          )}
-        </Panel>
-      </Reveal>
-
-      <Reveal className="mt-4">
-        <Panel>
-          <PanelHead
-            title="New Active Students vs Goal"
-            note={data?.goals?.period ? `organisation-wide · ${data.goals.period}` : 'organisation-wide'}
-            detailsButton={
-              <DetailsButton
-                title="Goals This Month — full details"
-                metric="goalsDetail"
-                rangeDays={rangeDays}
-                columns={GOAL_COLUMNS}
-              />
-            }
-          />
-          {newStudentGoal ? (
-            <div className="mt-4">
-              <div className="flex flex-wrap items-baseline justify-between gap-3">
-                <span className="od-figure text-[34px] leading-none text-[var(--studio-primary)]">
-                  {num(newStudentGoal.actual)}
-                </span>
-                <span className="text-[12px] tabular-nums text-muted-foreground">
-                  {newStudentGoal.target !== null ? (
-                    <>
-                      of {num(newStudentGoal.target)} target ·{' '}
-                      <b
-                        className={
-                          newStudentGoal.pct >= 100
-                            ? 'text-success'
-                            : newStudentGoal.pct >= 85
-                              ? 'text-warning'
-                              : 'text-destructive'
-                        }
-                      >
-                        {newStudentGoal.pct}%
-                      </b>
-                    </>
-                  ) : (
-                    'no new-student target set for this month'
-                  )}
-                </span>
-              </div>
-              {newStudentGoal.target !== null && (
+      <div className="grid grid-cols-1 gap-[18px] [&>*]:min-w-0 min-[1200px]:grid-cols-2">
+        <CardFrame
+          {...frame}
+          title="R-24 Active students: booked vs not booked"
+          snapshot="Now"
+          note={
+            totals
+              ? `${num(totals.booked)} booked + ${num(totals.notBooked)} not booked = ${num(totals.active)} active · ${Number(totals.bookedPct).toFixed(1)}% booked`
+              : null
+          }
+          details={(r) => <DetailsButton title="Active Students — full details" metric="studentHealth" rangeDays={r} columns={STUDENT_COLUMNS} />}
+        >
+          {(d) => {
+            const perStudio = bySize(d.studentHealth)
+            return perStudio.length ? (
+              <>
                 <div className="mt-3">
-                  <GoalBar pct={newStudentGoal.pct} />
+                  <Legend items={[{ label: 'Booked', color: BOOKED_COLOR }, { label: 'Not booked', color: NOT_BOOKED_COLOR }]} />
                 </div>
-              )}
-            </div>
-          ) : (
-            <NotAvailable
-              message="No new-student goal configured for this month."
-              requires="Set a new active students target in Settings → Goals."
-              height={140}
-            />
-          )}
-        </Panel>
-      </Reveal>
+                <div className="mt-3">
+                  <StackedCompare
+                    aColor={BOOKED_COLOR}
+                    bColor={NOT_BOOKED_COLOR}
+                    rows={perStudio.map((r) => ({
+                      label: r.location,
+                      sublabel: `${num(r.booked)} of ${num(r.active)} booked`,
+                      a: r.booked,
+                      b: r.notBooked,
+                      valueLabel: `${Number(r.bookedPct).toFixed(1)}%`,
+                      valueTone: bookedTone(r.bookedPct),
+                    }))}
+                  />
+                </div>
+              </>
+            ) : (
+              <Empty message="No data for this period" height={200} />
+            )
+          }}
+        </CardFrame>
+
+        <CardFrame
+          {...frame}
+          title="R-25 Lessons per active student"
+          details={(r) => <DetailsButton title="Active Students — full details" metric="studentHealth" rangeDays={r} columns={STUDENT_COLUMNS} />}
+        >
+          {(d, c) => {
+            const perStudio = bySize(d.studentHealth)
+            const prevIndex = engagementIndex(c?.previous)
+            const lyIndex = engagementIndex(c?.lastYear)
+            return perStudio.length ? (
+              <DataTable head={['Studio', 'Avg per week', 'Avg MTD', 'MoM', 'YoY']} minWidth={560}>
+                {perStudio.map((r, i) => (
+                  <Row key={r.location}>
+                    <Cell first tone={i === 0 ? 'text-[var(--studio-primary)]' : 'text-foreground'}>{r.location}</Cell>
+                    <Cell tone="text-[var(--studio-primary)] font-bold">{Number(r.avgLessonsPerActiveStudentPerWeek).toFixed(1)}</Cell>
+                    <Cell>{Number(r.avgLessonsMTD).toFixed(1)}</Cell>
+                    <GrowthCell current={r} index={prevIndex} />
+                    <GrowthCell current={r} index={lyIndex} />
+                  </Row>
+                ))}
+              </DataTable>
+            ) : (
+              <Empty message="No data for this period" height={160} />
+            )
+          }}
+        </CardFrame>
+      </div>
     </section>
   )
 }

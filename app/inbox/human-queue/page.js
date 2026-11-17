@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
@@ -365,6 +365,7 @@ function HumanQueuePageContent() {
   const [agents, setAgents] = useState([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [queueListError, setQueueListError] = useState(false)
   const [selectedEscalationId, setSelectedEscalationId] = useState(null)
   const [historyDetailItem, setHistoryDetailItem] = useState(null)
   const [answeringId, setAnsweringId] = useState(null)
@@ -432,6 +433,7 @@ function HumanQueuePageContent() {
   // -- Callbacks tab state --
   const [callbacks, setCallbacks] = useState([])
   const [callbacksLoading, setCallbacksLoading] = useState(false)
+  const [callbacksError, setCallbacksError] = useState(false)
   const [markingCalledId, setMarkingCalledId] = useState(null)
   const [cancellingCallbackId, setCancellingCallbackId] = useState(null)
   const [callbackStats, setCallbackStats] = useState({
@@ -448,6 +450,25 @@ function HumanQueuePageContent() {
   const queueFetchGenRef = useRef(0)
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
+
+  // Drop the previous tab's rows before paint. Otherwise Resolved can flash
+  // "No resolved calls" while its badge still shows the last count, and a slow
+  // response from the tab you left can land on the tab you just opened.
+  useLayoutEffect(() => {
+    queueFetchGenRef.current += 1
+    callbackFetchGenRef.current += 1
+    if (activeTab === 'callbacks') {
+      setCallbacks([])
+      setCallbackTotal(0)
+      setCallbacksError(false)
+      setCallbacksLoading(true)
+      return
+    }
+    setEscalations([])
+    setSelectedEscalationId(null)
+    setQueueListError(false)
+    setLoading(true)
+  }, [activeTab])
 
   // -- Agent availability toggling --
   const [togglingAgentId, setTogglingAgentId] = useState(null)
@@ -495,11 +516,14 @@ function HumanQueuePageContent() {
 
       if (viewingThisTab && queueResult.success) {
         const list = extractList(queueResult)
+        setQueueListError(false)
         setEscalations(list)
         setSelectedEscalationId((current) => {
           if (current && list.some((i) => (i.id || i._id) === current)) return current
           return list[0]?.id || list[0]?._id || null
         })
+      } else if (viewingThisTab && !silent) {
+        setQueueListError(true)
       }
 
       if (queueResult.success) {
@@ -559,6 +583,9 @@ function HumanQueuePageContent() {
       }
     } catch (error) {
       console.error(error)
+      if (!silent && gen === queueFetchGenRef.current && activeTabRef.current === requestedTab) {
+        setQueueListError(true)
+      }
     } finally {
       if (gen !== queueFetchGenRef.current) return
       if (!silent) setLoading(false)
@@ -594,6 +621,7 @@ function HumanQueuePageContent() {
       if (activeTabRef.current !== 'callbacks') return
 
       if (listResult.success) {
+        setCallbacksError(false)
         let total = Number(listResult.data?.total) || 0
         let items = Array.isArray(listResult.data?.items) ? listResult.data.items : []
         const skip = Math.max(0, (page - 1) * CALLBACK_PAGE_SIZE)
@@ -613,6 +641,8 @@ function HumanQueuePageContent() {
 
         setCallbacks(items)
         setCallbackTotal(total)
+      } else if (!silent) {
+        setCallbacksError(true)
       }
       if (statsResult.success && statsResult.data) {
         setCallbackStats({
@@ -626,6 +656,9 @@ function HumanQueuePageContent() {
       if (agentsResult?.success) applyAgentsPermissionPayload(agentsResult.data)
     } catch (error) {
       console.error(error)
+      if (!silent && gen === callbackFetchGenRef.current && activeTabRef.current === 'callbacks') {
+        setCallbacksError(true)
+      }
     } finally {
       if (gen === callbackFetchGenRef.current) setCallbacksLoading(false)
     }
@@ -1385,8 +1418,9 @@ function HumanQueuePageContent() {
                 {callbacks.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border bg-background py-12 text-center text-sm text-muted-foreground">
                     <PhoneMissed className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                    No callbacks
-                    {callbackFilter ? ` · ${callbackFilter}` : ''}.
+                    {callbacksError
+                      ? 'Could not load callbacks. They will refresh automatically.'
+                      : `No callbacks${callbackFilter ? ` · ${callbackFilter}` : ''}.`}
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -1629,7 +1663,9 @@ function HumanQueuePageContent() {
                   <div className="space-y-2">
                     {escalations.length === 0 ? (
                       <div className="rounded-xl border border-dashed border-border bg-background py-10 text-center text-sm text-muted-foreground">
-                        No resolved calls yet.
+                        {queueListError
+                          ? 'Could not load resolved calls. They will refresh automatically.'
+                          : 'No resolved calls yet.'}
                       </div>
                     ) : (
                       escalations.map((item) => {
@@ -1705,8 +1741,11 @@ function HumanQueuePageContent() {
                 <div className="space-y-2">
                   {escalations.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-border bg-background py-10 text-center text-sm text-muted-foreground">
-                      {activeTab === 'waiting' && 'No callers waiting.'}
-                      {activeTab === 'active' && 'No active calls right now.'}
+                      {queueListError
+                        ? 'Could not load calls. They will refresh automatically.'
+                        : activeTab === 'waiting'
+                          ? 'No callers waiting.'
+                          : 'No active calls right now.'}
                     </div>
                   ) : (
                     escalations.map((item) => {

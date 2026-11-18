@@ -1,10 +1,14 @@
 'use client'
 
 import { useState } from 'react'
+import { NAMED_RANGE_OPTIONS } from '@/lib/dashboardRanges'
 
 export const PERIOD_OPTIONS = [
+  ...NAMED_RANGE_OPTIONS,
   { value: 'mtd', label: 'Month to date' },
+  { value: 7, label: 'Last 7 days' },
   { value: 30, label: 'Last 30 days' },
+  { value: 90, label: 'Last 90 days' },
   { value: 'qtd', label: 'Quarter to date' },
   { value: 'ytd', label: 'Year to date' },
   { value: 'custom', label: 'Custom' },
@@ -15,7 +19,7 @@ export function periodLabel(range) {
   return PERIOD_OPTIONS.find((o) => o.value === range)?.label || 'Month to date'
 }
 
-/** Period dropdown from the spec: Month to date · Last 30 days · Quarter to date · Year to date · Custom. */
+/** Period dropdown from the spec: Today to Next year (3.2), rolling days, month/quarter/year to date and Custom. */
 export default function PeriodSelect({ value, onChange }) {
   const isCustom = value && typeof value === 'object'
   const [from, setFrom] = useState(isCustom ? value.from : '')
@@ -35,7 +39,7 @@ export default function PeriodSelect({ value, onChange }) {
           const v = e.target.value
           if (v === 'custom') return setShowCustom(true)
           setShowCustom(false)
-          onChange(v === '30' ? 30 : v)
+          onChange(['7', '30', '90'].includes(v) ? Number(v) : v)
         }}
         className="h-9 rounded-lg border border-border bg-background px-3 text-[13px] font-semibold text-foreground"
       >

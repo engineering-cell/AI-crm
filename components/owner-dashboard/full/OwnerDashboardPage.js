@@ -13,6 +13,7 @@ import CapacitySection from './sections/CapacitySection'
 import ConversionsSection from './sections/ConversionsSection'
 import MarketingSection from './sections/MarketingSection'
 import StudentHealthSection from './sections/StudentHealthSection'
+import NeedsFixingSection from './sections/NeedsFixingSection'
 
 /* ── sticky section nav ─────────────────────────────────────────────────── */
 
@@ -119,7 +120,7 @@ function Skeleton() {
 }
 
 export default function OwnerDashboardPage() {
-  const [range, setRange] = useState('mtd')
+  const [range, setRange] = useState('this_month')
   const [showIds, setShowIds] = useState(false)
   const { data, classic, summaries, comparisons, error, isLoading, isValidating, refresh } = useOwnerDashboardPage(range)
 
@@ -175,7 +176,7 @@ export default function OwnerDashboardPage() {
         <Skeleton />
       ) : (
         <>
-          <ScorecardSection summaries={summaries} data={data} />
+          <ScorecardSection summaries={summaries} data={data} comparisons={comparisons} rangeDays={range} />
           {data?.revenue && <RevenueSection {...shared} />}
           {data?.lessons && (
             <>
@@ -187,6 +188,7 @@ export default function OwnerDashboardPage() {
           {data?.funnel && <ConversionsSection {...shared} />}
           {data?.marketing && <MarketingSection {...shared} />}
           {data?.studentHealth && <StudentHealthSection {...shared} />}
+          <NeedsFixingSection data={data} />
 
         </>
       )}

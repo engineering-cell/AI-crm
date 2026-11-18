@@ -39,14 +39,14 @@ function InstructorForecast({ rows }) {
   const { shown, toggle } = useCollapsedRows(rows)
   return rows.length ? (
     <>
-      <DataTable head={['Instructor', 'Studio', 'Scheduled', 'Total capacity', 'Remaining slots', 'Projected utilization']} minWidth={640}>
+      <DataTable head={['Instructor', 'Studio', 'Scheduled (lessons)', 'Available (hrs)', 'Remaining (hrs)', 'Projected (%)']} minWidth={640}>
         {shown.map((r) => (
           <Row key={`${r.teacher}-${r.studio}`}>
             <Cell first>{r.teacher}</Cell>
             <Cell>{r.studio || <Dash />}</Cell>
             <Cell>{num(r.scheduled)}</Cell>
-            <Cell>{num(r.capacitySlots)}</Cell>
-            <Cell>{num(r.remainingSlots)}</Cell>
+            <Cell>{num(r.availableHrs)}</Cell>
+            <Cell>{num(r.remainingHrs)}</Cell>
             <Cell tone={`${utilTone(r.utilizationPct)} font-bold`}>{r.utilizationPct === null ? <Dash /> : pct1(r.utilizationPct)}</Cell>
           </Row>
         ))}
@@ -54,7 +54,7 @@ function InstructorForecast({ rows }) {
       {toggle}
     </>
   ) : (
-    <Empty message="No data for this period" height={160} />
+    <Empty message="No data for this range" height={160} />
   )
 }
 
@@ -83,7 +83,7 @@ export default function ForecastSection({ data, comparisons, rangeDays }) {
                 <RankedBars labelWidth={210} rows={byStudio.map((r) => ({ label: r.location, value: r.scheduled }))} accent="#E87FB0" />
               </div>
             ) : (
-              <Empty message="No data for this period" height={160} />
+              <Empty message="No data for this range" height={160} />
             )
           }}
         </CardFrame>
@@ -103,7 +103,7 @@ export default function ForecastSection({ data, comparisons, rangeDays }) {
           {(d) => {
             const rev = d.revenue?.spec?.netSales?.trend?.monthly12
             const les = d.lessons?.spec?.monthly12
-            if (!rev || !les) return <Empty message="No data for this period" height={200} />
+            if (!rev || !les) return <Empty message="No data for this range" height={200} />
             const combo = rev.map((r, i) => ({ label: r.label, revenue: r.value, lessons: les[i]?.value || 0 }))
             return (
               <>

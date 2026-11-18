@@ -92,7 +92,7 @@ function StudioCard({ d, comparisons }) {
       />
     </div>
   ) : (
-    <Empty message="No data for this period" height={160} />
+    <Empty message="No data for this range" height={160} />
   )
 }
 
@@ -101,7 +101,7 @@ function MixCard({ d }) {
   const types = (mixSpec?.types || []).filter((t) => t.count > 0)
   return types.length ? (
     <div className="mt-3 grid items-start gap-4 sm:grid-cols-[190px_1fr]">
-      <DonutChart data={types.map((t) => ({ name: t.type, value: t.count }))} centerLabel="Lessons" centerValue={num(mixSpec.total)} height={190} valueFormatter={(v) => num(v)} showLegend={false} />
+      <DonutChart data={types.map((t) => ({ name: t.type, value: t.count }))} centerLabel={`${num(mixSpec.privateTotal ?? 0)} private + ${num(mixSpec.introTotal ?? 0)} intros`} centerValue={num(mixSpec.total)} height={190} valueFormatter={(v) => num(v)} showLegend={false} />
       <DrillAccordion
         items={types.map((t) => ({
           label: `${t.type} · ${t.pct.toFixed(1)}%`,
@@ -111,7 +111,7 @@ function MixCard({ d }) {
       />
     </div>
   ) : (
-    <Empty message="No data for this period" height={200} />
+    <Empty message="No data for this range" height={200} />
   )
 }
 
@@ -132,7 +132,7 @@ function InstructorCard({ d, comparisons }) {
       ))}
     </DataTable>
   ) : (
-    <Empty message="No data for this period" height={160} />
+    <Empty message="No data for this range" height={160} />
   )
 }
 
@@ -174,7 +174,7 @@ export default function LessonsSection({ data, comparisons, rangeDays }) {
                 <TrendArea data={monthly} xKey="label" yKey="value" height="100%" seriesName="Lessons" gradientId="odLessonTrend" />
               </Fill>
             ) : (
-              <Empty message="No data for this period" height={150} />
+              <Empty message="No data for this range" height={150} />
             )
           }
         </CardFrame>

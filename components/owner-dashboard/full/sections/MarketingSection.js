@@ -1,5 +1,9 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+import { useSWRConfig } from 'swr'
+import { useToast } from '@/components/ui/toast'
+import api from '@/lib/api'
 import DonutChart from '@/components/dashboard/widgets/DonutChart'
 import LeadsDetailsButton from '@/components/owner-dashboard/widgets/LeadsDetailsButton'
 import { formatFieldDisplayValue } from '@/lib/dynamic-list-normalize'
@@ -52,7 +56,7 @@ function LeadsBySource({ d }) {
       </ul>
     </div>
   ) : (
-    <Empty message="No data for this period" height={200} />
+    <Empty message="No data for this range" height={200} />
   )
 }
 
@@ -63,7 +67,7 @@ function RevenueBySource({ d }) {
       <RankedBars rows={rows.map((r) => ({ label: r.source, value: r.revenue }))} valueFormatter={moneyShort} />
     </div>
   ) : (
-    <Empty message="No data for this period" height={200} />
+    <Empty message="No data for this range" height={200} />
   )
 }
 
@@ -93,18 +97,76 @@ function LeadsByStudio({ d }) {
       </div>
     </>
   ) : (
-    <Empty message="No data for this period" height={160} />
+    <Empty message="No data for this range" height={160} />
   )
 }
 
 const pct1 = (v) => `${Number(v).toFixed(1)}%`
 
-/** R-22 (phase 2): ad-spend columns stay empty until spend is imported or entered. */
+/** Monthly ad spend entry for R-22. The source must be spelled like the lead source so spend lines up with the leads. */
+function AdSpendForm({ sources }) {
+  const { mutate } = useSWRConfig()
+  const toast = useToast()
+  const [source, setSource] = useState('')
+  // '' = every studio together; otherwise one studio, so its own studio view shows it.
+  const [studioId, setStudioId] = useState('')
+  const [studios, setStudios] = useState([])
+  useEffect(() => {
+    let live = true
+    api.get('/api/location?limit=200').then((res) => {
+      if (live && res.success) setStudios((res.data || []).filter((l) => String(l.status || '').toLowerCase() === 'active'))
+    })
+    return () => { live = false }
+  }, [])
+  const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7))
+  const [amount, setAmount] = useState('')
+  const [saving, setSaving] = useState(false)
+  const save = async (e) => {
+    e.preventDefault()
+    if (!source.trim() || !period || amount === '') return
+    setSaving(true)
+    const res = await api.post('/api/ad-spend', { source: source.trim(), period, amount: Number(amount), ...(studioId ? { locationID: studioId } : {}) })
+    setSaving(false)
+    if (res.success) {
+      toast.success('Ad spend saved.')
+      setAmount('')
+      mutate((key) => Array.isArray(key) && String(key[0]).startsWith('owner-dashboard'))
+    } else {
+      toast.error(res.error || 'Could not save ad spend.')
+    }
+  }
+  const field = 'h-8 rounded-lg border border-border bg-background px-2 text-[12px] text-foreground outline-none focus:border-primary'
+  return (
+    <form onSubmit={save} className="mt-3 flex flex-wrap items-end gap-2">
+      <label className="text-[11px] text-muted-foreground">Source
+        <input list="ad-spend-sources" value={source} onChange={(e) => setSource(e.target.value)} placeholder="e.g. Meta" className={`${field} mt-0.5 block w-32`} />
+      </label>
+      <datalist id="ad-spend-sources">{sources.map((x) => <option key={x} value={x} />)}</datalist>
+      <label className="text-[11px] text-muted-foreground">Studio
+        <select value={studioId} onChange={(e) => setStudioId(e.target.value)} className={`${field} mt-0.5 block w-44`}>
+          <option value="">All studios together</option>
+          {studios.map((l) => <option key={l._id} value={l._id}>{l.name}</option>)}
+        </select>
+      </label>
+      <label className="text-[11px] text-muted-foreground">Month
+        <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${field} mt-0.5 block`} />
+      </label>
+      <label className="text-[11px] text-muted-foreground">Spend ($)
+        <input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className={`${field} mt-0.5 block w-28`} />
+      </label>
+      <button type="submit" disabled={saving} className="h-8 rounded-lg bg-primary px-3 text-[12px] font-semibold text-primary-foreground disabled:opacity-60">
+        {saving ? 'Saving…' : 'Save spend'}
+      </button>
+    </form>
+  )
+}
+
+/** R-22: spend columns fill in once monthly ad spend has been entered. */
 function ChannelEconomics({ d }) {
   const rows = d.marketing?.channelEconomics || []
   return rows.length ? (
     <>
-      <DataTable head={['Source', 'Leads', 'L→I %', 'I→S %', 'Revenue', 'CPL', 'Cost per sale', 'ROAS']} minWidth={640}>
+      <DataTable head={['Source', 'Leads', 'L→I %', 'I→S %', 'Revenue', 'Spend', 'CPL', 'Cost per sale', 'ROAS']} minWidth={720}>
         {rows.map((r) => (
           <Row key={r.source}>
             <Cell first>{r.source}</Cell>
@@ -112,16 +174,18 @@ function ChannelEconomics({ d }) {
             <Cell>{pct1(r.leadToIntroPct)}</Cell>
             <Cell>{pct1(r.introToStarterPct)}</Cell>
             <Cell tone="text-[var(--studio-primary)] font-bold">{moneyShort(r.revenue)}</Cell>
+            <Cell>{r.spend === null || r.spend === undefined ? <Dash /> : moneyShort(r.spend)}</Cell>
             <Cell>{r.cpl === null ? <Dash /> : `$${r.cpl}`}</Cell>
             <Cell>{r.costPerSale === null ? <Dash /> : `$${r.costPerSale}`}</Cell>
             <Cell>{r.roas === null ? <Dash /> : `${r.roas}×`}</Cell>
           </Row>
         ))}
       </DataTable>
-      <p className="mt-3 text-[12.5px] text-muted-foreground">CPL, cost per sale and ROAS need monthly ad spend per platform per studio (import from Meta and Google Ads, or manual entry).</p>
+      <p className="mt-3 text-[12.5px] text-muted-foreground">Spend is entered by month; a date range takes every month it touches. CPL, cost per sale and ROAS stay blank for a source until its spend is entered. Spend saved for "All studios together" appears in the all-studios view only; save it per studio to see it in a studio view.</p>
+      <AdSpendForm sources={rows.map((r) => r.source)} />
     </>
   ) : (
-    <Empty message="No data for this period" height={160} />
+    <Empty message="No data for this range" height={160} />
   )
 }
 

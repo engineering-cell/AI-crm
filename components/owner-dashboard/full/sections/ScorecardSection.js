@@ -1,8 +1,10 @@
 'use client'
 
 import { BadgeDollarSign, CalendarCheck, CalendarClock, Gauge, GraduationCap, ShoppingBag, Sparkles, Target, UserPlus, Users, Rocket } from 'lucide-react'
-import { delta, pointDelta } from '@/lib/hooks/useOwnerDashboardPage'
-import { DeltaPill, Emph, IdBadge, SectionHead, money, num, pct1 } from '../chrome'
+import { useState } from 'react'
+import { comparisonWindows, delta, pointDelta, summarize } from '@/lib/hooks/useOwnerDashboardPage'
+import { PeriodPicker, useCardData } from '../CardFrame'
+import { DeltaPill, Emph, IdBadge, money, num, pct1 } from '../chrome'
 
 /**
  * K-01 … K-11, in the order and with the labels of the Owner Dashboard spec.
@@ -11,23 +13,27 @@ import { DeltaPill, Emph, IdBadge, SectionHead, money, num, pct1 } from '../chro
  * (Booked %, Scheduled, Utilization of the live week) carry no pills.
  */
 /** Percentage-point pill from a precomputed change (null → no pill). */
-const ppPill = (v) => (v === null || v === undefined ? null : { pct: v, dir: v >= 0 ? 'up' : 'down', points: true, noBaseline: false })
 
-function buildCards({ current, previous, lastYear }, { rates, report2 }) {
+function buildCards({ current, previous, lastYear }, { rates, report2, snapshot }) {
   // Scorecard rates use the latest cohort that has finished its window (spec), so
   // this month's value does not drop artificially at the start of the month.
-  const rate = (key) => (rates || []).find((r) => r.key === key)?.latest || null
-  const cohortPills = (key) => ({ mom: ppPill(rate(key)?.changePp), yoy: ppPill(rate(key)?.yoyPp) })
-  const cohortValue = (key) => (rate(key) ? rate(key).ratePct : null)
+  const inRange = (key) => (rates || []).find((r) => r.key === key)?.range || null
+  const cohortValue = (key) => (inRange(key) ? inRange(key).ratePct : null)
   const cur = current || {}
   const prev = previous || {}
   const ly = lastYear || {}
 
   const value = (v, fmt) => (v === null || v === undefined ? null : fmt(v))
   const ratio = (key) => ({ mom: delta(cur[key], prev[key]), yoy: delta(cur[key], ly[key]) })
+  // Rate pills: percentage points between the two periods' rates, shown only when both periods had people to measure.
+  const ratePts = (field) => {
+    const cohortKey = field.replace('Pct', 'Cohort')
+    const diff = (ref) => (ref?.[cohortKey] > 0 && cur[cohortKey] > 0 ? pointDelta(cur[field], ref[field]) : null)
+    return { mom: diff(prev), yoy: diff(ly) }
+  }
   const points = (key) => ({ mom: pointDelta(cur[key], prev[key]), yoy: pointDelta(cur[key], ly[key]) })
 
-  return [
+  const cards = [
     { id: 'K-01', label: 'Revenue', icon: BadgeDollarSign, value: value(cur.revenue, money), href: 'od-revenue', ...ratio('revenue') },
     { id: 'K-02', label: 'Lessons taught', icon: GraduationCap, value: value(cur.lessons, num), href: 'od-lessons', ...ratio('lessons') },
     { id: 'K-03', label: 'Leads', icon: UserPlus, value: value(cur.leads, num), href: 'od-conversions', ...ratio('leads') },
@@ -38,8 +44,8 @@ function buildCards({ current, previous, lastYear }, { rates, report2 }) {
       icon: Target,
       value: value(cohortValue('leadToIntro') ?? cur.leadToIntroPct, pct1),
       href: 'od-conversions',
-      note: rate('leadToIntro') ? `${num(rate('leadToIntro').converted)} of ${num(rate('leadToIntro').cohort)} leads booked an intro (${rate('leadToIntro').month})` : null,
-      ...(rate('leadToIntro') ? cohortPills('leadToIntro') : points('leadToIntroPct')),
+      note: inRange('leadToIntro') ? `${num(inRange('leadToIntro').converted)} of ${num(inRange('leadToIntro').cohort)} leads converted` : null,
+      ...ratePts('leadToIntroPct'),
     },
     {
       id: 'K-06',
@@ -47,8 +53,8 @@ function buildCards({ current, previous, lastYear }, { rates, report2 }) {
       icon: ShoppingBag,
       value: value(cohortValue('introToPurchase') ?? cur.introToPurchasePct, pct1),
       href: 'od-conversions',
-      note: report2 ? `Avg first purchase ${money(report2.avgSale)} · avg cash ${money(report2.avgCashAtSale)}` : null,
-      ...(rate('introToPurchase') ? cohortPills('introToPurchase') : points('introToPurchasePct')),
+      note: report2 ? `${num(report2.firstPurchases)} of ${num(report2.introsTaught)} bought · avg first purchase ${money(report2.avgSale)} · avg cash ${money(report2.avgCashAtSale)}` : null,
+      ...ratePts('introToPurchasePct'),
     },
     {
       id: 'K-07',
@@ -60,7 +66,7 @@ function buildCards({ current, previous, lastYear }, { rates, report2 }) {
         cur.startersSold !== null && cur.startersSold !== undefined
           ? `${num(cur.startersSold)} Starters sold · avg ${money(cur.avgStarterSale)}`
           : null,
-      ...(rate('introToStarter') ? cohortPills('introToStarter') : points('introToStarterPct')),
+      ...ratePts('introToStarterPct'),
     },
     {
       id: 'K-08',
@@ -82,7 +88,7 @@ function buildCards({ current, previous, lastYear }, { rates, report2 }) {
       href: 'od-forecast',
       note:
         cur.introsScheduledWeek !== null && cur.introsScheduledWeek !== undefined
-          ? `Rest of week · ${num(cur.introsScheduledRestOfMonth)} more rest of month`
+          ? `${windowLabel(cur.scheduledWindow)} · ${num(cur.introsScheduledRestOfMonth)} more rest of month`
           : null,
     },
     {
@@ -91,7 +97,7 @@ function buildCards({ current, previous, lastYear }, { rates, report2 }) {
       icon: CalendarClock,
       value: value(cur.scheduledWeek, num),
       href: 'od-forecast',
-      note: cur.confirmedPct !== null && cur.confirmedPct !== undefined ? `${pct1(cur.confirmedPct)} of them confirmed` : 'Confirmed lessons this week',
+      note: `${windowLabel(cur.scheduledWindow)}${cur.introsScheduledWeek !== null && cur.introsScheduledWeek !== undefined ? ` · + ${num(cur.introsScheduledWeek)} intros` : ''}`,
     },
     {
       id: 'K-11',
@@ -100,12 +106,41 @@ function buildCards({ current, previous, lastYear }, { rates, report2 }) {
       value: value(cur.utilizationPct, (v) => pct1(v)),
       href: 'od-capacity',
       note:
-        cur.actualPerWeek !== null && cur.capacityPerWeek
-          ? `${cur.actualPerWeek} of ${num(cur.capacityPerWeek)} lessons per week`
-          : null,
+        cur.availableHrs === 0 && cur.bookedHrsAll
+          ? `${num(cur.bookedHrsAll)} hrs booked · availability not set for ${num(cur.unconfiguredInstructors)} instructors · ${windowLabel(cur.scheduledWindow)}`
+          : cur.availableHrs !== null && cur.availableHrs !== undefined
+          ? `${num(cur.bookedHrs)} of ${num(cur.availableHrs)} hrs booked · ${windowLabel(cur.scheduledWindow)}`
+          : cur.actualPerWeek !== null && cur.capacityPerWeek
+            ? `${cur.actualPerWeek} of ${num(cur.capacityPerWeek)} lessons per week`
+            : null,
       ...points('utilizationPct'),
     },
   ]
+
+  // "Right now" cards cannot be rebuilt for a past date, so their pills compare with the nightly snapshot
+  // (spec 3.1): K-08 against the same date last month / last year, K-09 to K-11 against 4 weeks / 52 weeks ago.
+  // No snapshot yet shows "—".
+  const FROM_SNAPSHOT = {
+    'K-08': { field: 'bookedPct', now: cur.bookedPct, mom: 'lastMonth', yoy: 'lastYear', points: true },
+    'K-09': { field: 'scheduledIntrosWeek', now: cur.introsScheduledWeek, mom: 'weeks4', yoy: 'weeks52' },
+    'K-10': { field: 'scheduledLessonsWeek', now: cur.scheduledWeek, mom: 'weeks4', yoy: 'weeks52' },
+    'K-11': { field: 'utilizationPct', now: cur.utilizationPct, mom: 'weeks4', yoy: 'weeks52', points: true },
+  }
+  return cards.map((card) => {
+    const m = FROM_SNAPSHOT[card.id]
+    if (!m) return card
+    const diff = (then) => (then === null || then === undefined ? null : m.points ? pointDelta(m.now, then) : delta(m.now, then))
+    return { ...card, mom: diff(snapshot?.[m.mom]?.[m.field]), yoy: diff(snapshot?.[m.yoy]?.[m.field]) }
+  })
+}
+
+/** "Rest of this week · 18–22 Nov": the dates the scheduled cards cover, so nobody reads them as month to date. */
+function windowLabel(w) {
+  if (!w?.from || !w?.to) return 'Rest of this week'
+  const fmt = (v, opts) => new Date(v).toLocaleDateString('en-US', opts)
+  const a = fmt(w.from, { day: 'numeric' })
+  const b = fmt(w.to, { day: 'numeric', month: 'short' })
+  return `${w.label || 'Rest of this week'} · ${a}–${b}`
 }
 
 function scrollTo(e, id) {
@@ -115,7 +150,7 @@ function scrollTo(e, id) {
   el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-function KpiCard({ card }) {
+function KpiCard({ card, picker }) {
   const Icon = card.icon || Users
   return (
     <a
@@ -129,13 +164,19 @@ function KpiCard({ card }) {
           <Icon className="h-4 w-4" aria-hidden />
         </span>
         <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">{card.label}</p>
-        <span className="ml-auto"><IdBadge id={card.id} /></span>
+        <span className="ml-auto flex items-center gap-2">
+          {picker && (
+            // The dropdown sits inside the card link: stop it from also scrolling to the section.
+            <span onClick={(e) => { e.preventDefault(); e.stopPropagation() }}>{picker}</span>
+          )}
+          <IdBadge id={card.id} />
+        </span>
       </div>
       <p className="my-3 text-[30px] font-bold leading-none tabular-nums text-foreground">
         {card.value ?? <span className="text-muted-foreground/50">&mdash;</span>}
       </p>
       <div className="flex flex-wrap gap-1.5">
-        <DeltaPill d={card.mom} label="MoM" />
+        {!card.yearOnly && <DeltaPill d={card.mom} label="vs prev" />}
         <DeltaPill d={card.yoy} label="YoY" />
       </div>
       {card.note && (
@@ -147,20 +188,34 @@ function KpiCard({ card }) {
   )
 }
 
-export default function ScorecardSection({ summaries, data }) {
-  const cards = buildCards(summaries, { rates: data?.funnel?.spec?.conversionRates, report2: data?.funnel?.spec?.reports?.report2 })
+/** Spec 3.1, period type A: these cards follow the page range, and the card's own dropdown overrides it. */
+const RANGE_CARDS = new Set(['K-01', 'K-02', 'K-03', 'K-04', 'K-05', 'K-06', 'K-07'])
+
+function ScorecardItem({ id, summaries, data, comparisons }) {
+  const [override, setOverride] = useState(null)
+  const own = useCardData(override, data, comparisons)
+  const src = override ? own.data : data
+  const summ = override
+    ? { current: summarize(own.data), previous: summarize(own.comparisons?.previous), lastYear: summarize(own.comparisons?.lastYear) }
+    : summaries
+  const card = buildCards(summ, {
+    rates: src?.funnel?.spec?.conversionRates,
+    report2: src?.funnel?.spec?.reports?.report2,
+    snapshot: data?.snapshotCompare,
+  }).find((c) => c.id === id)
+  const yearOnly = override ? !comparisonWindows(override).priorPeriod : summaries?.yearOnly
+  const picker = RANGE_CARDS.has(id) ? <PeriodPicker title={card.label} override={override} setOverride={setOverride} /> : null
+  return <KpiCard card={{ ...card, yearOnly }} picker={picker} />
+}
+
+export default function ScorecardSection({ summaries, data, comparisons }) {
+  const ids = buildCards(summaries, { rates: data?.funnel?.spec?.conversionRates, report2: data?.funnel?.spec?.reports?.report2, snapshot: data?.snapshotCompare }).map((c) => c.id)
 
   return (
     <section id="od-scorecard" className="scroll-mt-32">
-      <SectionHead
-        number="01"
-        title="Scorecard"
-        tag="Are we growing?"
-        subtitle="Every card jumps to the report behind it."
-      />
       <div className="grid grid-cols-1 gap-[18px] min-[800px]:grid-cols-2 min-[1200px]:grid-cols-4">
-        {cards.map((card) => (
-          <KpiCard key={card.id} card={card} />
+        {ids.map((id) => (
+          <ScorecardItem key={id} id={id} summaries={summaries} data={data} comparisons={comparisons} />
         ))}
       </div>
     </section>

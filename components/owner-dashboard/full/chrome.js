@@ -25,6 +25,12 @@ export function money(n) {
   return `$${Math.round(v).toLocaleString()}`
 }
 
+/** Exact money to the cent, for figures people check against an account (outstanding balances). */
+export function moneyExact(n) {
+  const v = Number(n) || 0
+  return `${v < 0 ? '−' : ''}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 /** Compact money for axis ticks and dense bar rows. */
 export function moneyShort(n) {
   const v = Number(n) || 0
@@ -114,9 +120,6 @@ export function Chip({ children, ghost = false }) {
 export function SectionHead({ number, title, tag, subtitle }) {
   return (
     <div className="mb-[18px] flex flex-wrap items-center gap-x-3 gap-y-1.5">
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--studio-primary)] text-[12px] font-bold text-brand-foreground">
-        {number}
-      </span>
       <h2 className="text-[19px] font-extrabold leading-tight text-foreground">{title}</h2>
       {tag && <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{tag}</span>}
       {subtitle && <p className="ml-auto text-[12.5px] text-muted-foreground max-[1199px]:ml-0 max-[1199px]:w-full">{subtitle}</p>}
@@ -149,8 +152,9 @@ export function Emph({ children }) {
  * useOwnerDashboardPage — `null` means we genuinely have nothing to compare
  * against, so nothing renders rather than a misleading 0%.
  */
-export function DeltaPill({ d, label }) {
-  if (!d) return null
+export function DeltaPill({ d, label, hideWhenMissing = false }) {
+  // Spec 3.3: a missing comparison shows "—", never nothing or a made-up 0.
+  if (!d) return hideWhenMissing ? null : <span title={`No ${label} comparison yet`} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold text-muted-foreground"><span className="text-[9px] font-medium uppercase tracking-[0.04em] opacity-70">{label}</span>—</span>
 
   const up = d.dir === 'up'
   const text = d.noBaseline
@@ -226,7 +230,7 @@ export function NotAvailable({ message, requires, height = 200 }) {
 }
 
 /** "No rows for this period" — the data path exists, this window is just empty. */
-export function Empty({ message = 'No data for this period.', height = 200 }) {
+export function Empty({ message = 'No data for this range.', height = 200 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-4 text-center" style={{ minHeight: height }}>
       <BarChart3 className="h-6 w-6 text-muted-foreground/35" aria-hidden />

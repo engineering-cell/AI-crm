@@ -67,7 +67,7 @@ function ReportCard({ rid, tag, title, owner, details, data, comparisons, rangeD
       ) : reports ? (
         <div className="flex flex-1 flex-col">{children(reports)}</div>
       ) : (
-        <Empty message="No data for this period" height={160} />
+        <Empty message="No data for this range" height={160} />
       )}
     </div>
   )
@@ -274,7 +274,7 @@ function Report3({ reports }) {
       {steps[0]?.count ? (
         <Journey steps={steps} selected={pick} onSelect={setPick} mixTitle="product mix" mixFor={(s) => s.mix.map((m) => ({ label: m.category, count: m.count, pct: m.pct }))} />
       ) : (
-        <Empty message="No data for this period" height={160} />
+        <Empty message="No data for this range" height={160} />
       )}
     </>
   )
@@ -324,7 +324,7 @@ function Report4({ reports }) {
           </p>
         </>
       ) : (
-        <Empty message="No data for this period" height={160} />
+        <Empty message="No data for this range" height={160} />
       )}
     </>
   )

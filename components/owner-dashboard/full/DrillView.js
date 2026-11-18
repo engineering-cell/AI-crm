@@ -110,7 +110,7 @@ export default function DrillView({ kind, range }) {
             </button>
           </p>
         ) : !data || data.rows.length === 0 ? (
-          <p className="py-12 text-center text-sm text-muted-foreground">No data for this period</p>
+          <p className="py-12 text-center text-sm text-muted-foreground">No data for this range</p>
         ) : (
           <table className="w-full border-collapse tabular-nums">
             <thead>

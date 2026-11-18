@@ -54,6 +54,7 @@ const LIFECYCLE_STATUS_OPTIONS = [
   { value: 'trial_scheduled', label: 'Trial Scheduled', hint: 'First purchase done; trial lesson booked' },
   { value: 'trial_unscheduled', label: 'Trial Unscheduled', hint: 'First purchase / convert; lesson not booked yet' },
   { value: 'trial_no_show', label: 'Trial No-Show', hint: 'Missed the trial lesson' },
+  { value: 'group_only', label: 'Group Only', hint: 'Bought group classes. No intro and no program yet' },
   { value: 'no_sale', label: 'No Sale', hint: 'Attended trial, no program yet' },
   { value: 'active', label: 'Active', hint: 'Bought a program / package again' },
   { value: 'inactive', label: 'Inactive', hint: 'Lapsed or idle' },

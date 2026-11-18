@@ -404,7 +404,7 @@ describe('OwnerDashboardPage', () => {
     expect(screen.getByText('Outstanding balances')).toBeInTheDocument()
 
     // Spec column headers.
-    for (const column of ['Remaining slots', 'Projected utilization', 'Available hrs', 'Booked hrs', 'Avg per week']) {
+    for (const column of ['Remaining (hrs)', 'Projected (%)', 'Available hrs', 'Booked hrs', 'Avg per week']) {
       expect(screen.getAllByText(column).length).toBeGreaterThan(0)
     }
   })

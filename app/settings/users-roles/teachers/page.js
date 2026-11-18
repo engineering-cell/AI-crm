@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import AvailabilityEditor, { emptyAvailability, normalizeAvailability, availabilityPayload } from '@/components/teachers/AvailabilityEditor'
 import { useRouter } from 'next/navigation'
 import { readPersistedListState, usePersistListState } from '@/lib/hooks/useListStatePersistence'
 import { Plus, MoreHorizontal, Trash2, Pencil, X, ChevronDown, CalendarDays, User } from 'lucide-react'
@@ -52,6 +53,7 @@ const EMPTY_FORM = {
   status: 'active',
   locationID: [],
   weeklyCapacity: '',
+  availability: emptyAvailability(),
 }
 
 function FormField({ label, required, children }) {
@@ -86,6 +88,7 @@ function TeacherFormDialog({ open, onClose, onSaved, initial }) {
             weeklyCapacity: initial.weeklyCapacity === null || initial.weeklyCapacity === undefined
               ? ''
               : String(initial.weeklyCapacity),
+            availability: normalizeAvailability(initial.availability),
             locationID: Array.isArray(initial.locationID)
               ? initial.locationID.map((l) => String(l?._id ?? l)).filter(Boolean)
               : initial.locationID
@@ -135,6 +138,7 @@ function TeacherFormDialog({ open, onClose, onSaved, initial }) {
         bio: form.bio.trim() || undefined,
         status: form.status,
         weeklyCapacity,
+        availability: availabilityPayload(form.availability),
       })
     } else {
       // Teachers are Users with role "teacher" — created via the invite flow
@@ -148,6 +152,7 @@ function TeacherFormDialog({ open, onClose, onSaved, initial }) {
         specialties: form.specialties,
         bio: form.bio.trim() || undefined,
         weeklyCapacity,
+        availability: availabilityPayload(form.availability),
       })
     }
 
@@ -235,6 +240,10 @@ function TeacherFormDialog({ open, onClose, onSaved, initial }) {
               placeholder="Not set"
               className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[13px] text-foreground outline-none focus:border-primary"
             />
+          </FormField>
+
+          <FormField label="Availability (used for instructor utilization)">
+            <AvailabilityEditor value={form.availability} onChange={(v) => setField('availability', v)} />
           </FormField>
 
           <FormField label="Specialties">

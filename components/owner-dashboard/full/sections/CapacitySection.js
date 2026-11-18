@@ -13,6 +13,7 @@ const UTILIZATION_COLUMNS = [
   { key: 'studio', label: 'Studio' },
   { key: 'title', label: 'Lesson' },
   { key: 'status', label: 'Status' },
+  { key: 'durationHrs', label: 'Duration (hrs)' },
 ]
 
 const barTone = (pct) => (pct >= 90 ? 'bg-[#C13049]' : pct >= 70 ? 'bg-[#1C8553]' : 'bg-[#C2571A]')
@@ -43,7 +44,7 @@ function UtilizationTable({ rows }) {
       {toggle}
     </>
   ) : (
-    <Empty message="No data for this period" height={160} />
+    <Empty message="No data for this range" height={160} />
   )
 }
 
@@ -75,16 +76,16 @@ export default function CapacitySection({ data, comparisons, rangeDays }) {
               <div className="my-auto py-4">
                 <CapacityMeter pct={org.utilizationPct}>
                   <Emph>{`${num(org.availableHrs)} available hrs · ${num(org.bookedHrs)} booked hrs · ${num(org.remainingHrs)} remaining hrs`}</Emph>
-                  {org.extraStudentsPerWeek !== null && <Emph>{` ≈ ${num(org.extraStudentsPerWeek)} extra students per week`}</Emph>}
+                  {org.extraStudentsPerWeek !== null && <Emph>{` ≈ ${num(org.extraStudentsPerWeek)} more students a week`}</Emph>}
                 </CapacityMeter>
                 {org.unconfiguredInstructors > 0 && (
                   <p className="mt-3 text-[12.5px] text-muted-foreground">
-                    <Emph>{`${num(org.unconfiguredInstructors)} ${org.unconfiguredInstructors === 1 ? 'instructor has' : 'instructors have'} no weekly capacity set and ${org.unconfiguredInstructors === 1 ? 'is' : 'are'} not counted here.`}</Emph>
+                    <Emph>{`${num(org.unconfiguredInstructors)} ${org.unconfiguredInstructors === 1 ? 'instructor has' : 'instructors have'} no availability set (their lessons-per-week number is used, or they are left out) and ${org.unconfiguredInstructors === 1 ? 'is' : 'are'} not counted here.`}</Emph>
                   </p>
                 )}
               </div>
             ) : (
-              <Empty message="No data for this period" height={160} />
+              <Empty message="No data for this range" height={160} />
             )
           }}
         </CardFrame>

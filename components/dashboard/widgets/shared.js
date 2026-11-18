@@ -73,7 +73,7 @@ export function Trend({ type = 'up', text, label, className = 'mt-1.5' }) {
   )
 }
 
-export function EmptyChart({ message = 'No data for this period.' }) {
+export function EmptyChart({ message = 'No data for this range.' }) {
   return (
     <div className="flex h-[240px] flex-col items-center justify-center gap-2 px-4 text-center">
       <BarChart3 className="h-7 w-7 text-muted-foreground/35" aria-hidden />

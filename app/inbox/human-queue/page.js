@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
@@ -365,6 +365,7 @@ function HumanQueuePageContent() {
   const [agents, setAgents] = useState([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [queueListError, setQueueListError] = useState(false)
   const [selectedEscalationId, setSelectedEscalationId] = useState(null)
   const [historyDetailItem, setHistoryDetailItem] = useState(null)
   const [answeringId, setAnsweringId] = useState(null)
@@ -372,6 +373,9 @@ function HumanQueuePageContent() {
   const [tabCounts, setTabCounts] = useState({
     waiting: 0, active: 0, resolved: 0, callbacks: 0,
   })
+  // False until the first stats response for this page load — avoids a false
+  // 0 on Resolved after a branch switch while the location stamp is still running.
+  const [tabCountsReady, setTabCountsReady] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
 
   const [voiceSetupReady, setVoiceSetupReady] = useState(null)
@@ -432,6 +436,7 @@ function HumanQueuePageContent() {
   // -- Callbacks tab state --
   const [callbacks, setCallbacks] = useState([])
   const [callbacksLoading, setCallbacksLoading] = useState(false)
+  const [callbacksError, setCallbacksError] = useState(false)
   const [markingCalledId, setMarkingCalledId] = useState(null)
   const [cancellingCallbackId, setCancellingCallbackId] = useState(null)
   const [callbackStats, setCallbackStats] = useState({
@@ -445,6 +450,28 @@ function HumanQueuePageContent() {
   const [callbackPage, setCallbackPage] = useState(1)
   const [callbackTotal, setCallbackTotal] = useState(0)
   const callbackFetchGenRef = useRef(0)
+  const queueFetchGenRef = useRef(0)
+  const activeTabRef = useRef(activeTab)
+  activeTabRef.current = activeTab
+
+  // Drop the previous tab's rows before paint. Otherwise Resolved can flash
+  // "No resolved calls" while its badge still shows the last count, and a slow
+  // response from the tab you left can land on the tab you just opened.
+  useLayoutEffect(() => {
+    queueFetchGenRef.current += 1
+    callbackFetchGenRef.current += 1
+    if (activeTab === 'callbacks') {
+      setCallbacks([])
+      setCallbackTotal(0)
+      setCallbacksError(false)
+      setCallbacksLoading(true)
+      return
+    }
+    setEscalations([])
+    setSelectedEscalationId(null)
+    setQueueListError(false)
+    setLoading(true)
+  }, [activeTab])
 
   // -- Agent availability toggling --
   const [togglingAgentId, setTogglingAgentId] = useState(null)
@@ -471,6 +498,8 @@ function HumanQueuePageContent() {
   }, [])
 
   const fetchQueueData = useCallback(async ({ silent = false } = {}) => {
+    const gen = ++queueFetchGenRef.current
+    const requestedTab = activeTab
     try {
       if (!silent) setLoading(true)
       else setRefreshing(true)
@@ -480,18 +509,43 @@ function HumanQueuePageContent() {
         api.get('/api/human-queue/agents'),
         api.get('/api/human-queue/stats'),
       ])
+      if (gen !== queueFetchGenRef.current) return
       const queueResult = results[0]
       const agentsResult = results[1]
       const statsResult = results[2]
 
-      if (queueResult.success) {
+      if (agentsResult?.success) applyAgentsPermissionPayload(agentsResult.data)
+      // Same stats on every queue tab, so Resolved updates without opening it.
+      // A newer request already replaced this one — do not write its numbers.
+      if (statsResult.success && statsResult.data) {
+        setTabCounts({
+          waiting: statsResult.data.waiting ?? statsResult.data.unassigned ?? 0,
+          active: statsResult.data.active
+            ?? ((statsResult.data.assigned || 0) + (statsResult.data.transferred || 0))
+            ?? 0,
+          resolved: statsResult.data.resolved ?? 0,
+          callbacks: statsResult.data.callbacks ?? 0,
+        })
+        setTabCountsReady(true)
+      }
+
+      // Callbacks is a different list. A slow queue response must not replace it.
+      const viewingThisTab = activeTabRef.current === requestedTab
+
+      if (viewingThisTab && queueResult.success) {
         const list = extractList(queueResult)
+        setQueueListError(false)
         setEscalations(list)
         setSelectedEscalationId((current) => {
           if (current && list.some((i) => (i.id || i._id) === current)) return current
           return list[0]?.id || list[0]?._id || null
         })
+      } else if (viewingThisTab && !silent) {
+        setQueueListError(true)
+      }
 
+      if (queueResult.success) {
+        const list = extractList(queueResult)
         const currentActiveCall = activeCallRef.current
         if (currentActiveCall) {
           const activeId = String(currentActiveCall.id || currentActiveCall._id)
@@ -501,12 +555,14 @@ function HumanQueuePageContent() {
           if (!updated && activeConnectionRef.current) {
             try {
               const detail = await api.get(`/api/human-queue/${activeId}`)
+              if (gen !== queueFetchGenRef.current) return
               if (detail.success && detail.data) updated = detail.data
             } catch {
               // ignore — fall through
             }
           }
 
+          if (gen !== queueFetchGenRef.current) return
           if (updated) {
             const terminal = ['abandoned', 'resolved'].includes(updated.status)
             if (terminal) {
@@ -530,22 +586,13 @@ function HumanQueuePageContent() {
           }
         }
       }
-
-      if (agentsResult?.success) applyAgentsPermissionPayload(agentsResult.data)
-      if (statsResult.success && statsResult.data) {
-        setTabCounts((prev) => ({
-          waiting: statsResult.data.waiting ?? statsResult.data.unassigned ?? prev.waiting ?? 0,
-          active: statsResult.data.active
-            ?? ((statsResult.data.assigned || 0) + (statsResult.data.transferred || 0))
-            ?? prev.active
-            ?? 0,
-          resolved: statsResult.data.resolved ?? prev.resolved ?? 0,
-          callbacks: statsResult.data.callbacks ?? prev.callbacks ?? 0,
-        }))
-      }
     } catch (error) {
       console.error(error)
+      if (!silent && gen === queueFetchGenRef.current && activeTabRef.current === requestedTab) {
+        setQueueListError(true)
+      }
     } finally {
+      if (gen !== queueFetchGenRef.current) return
       if (!silent) setLoading(false)
       setRefreshing(false)
     }
@@ -571,13 +618,16 @@ function HumanQueuePageContent() {
       }
 
       let listResult = await api.get(buildUrl(page))
-      const [statsResult, agentsResult] = await Promise.all([
+      const [statsResult, queueStatsResult, agentsResult] = await Promise.all([
         api.get('/api/callback-requests/stats'),
+        api.get('/api/human-queue/stats'),
         api.get('/api/human-queue/agents'),
       ])
       if (gen !== callbackFetchGenRef.current) return
+      if (activeTabRef.current !== 'callbacks') return
 
       if (listResult.success) {
+        setCallbacksError(false)
         let total = Number(listResult.data?.total) || 0
         let items = Array.isArray(listResult.data?.items) ? listResult.data.items : []
         const skip = Math.max(0, (page - 1) * CALLBACK_PAGE_SIZE)
@@ -588,6 +638,7 @@ function HumanQueuePageContent() {
           setCallbackPage(lastPage)
           listResult = await api.get(buildUrl(lastPage))
           if (gen !== callbackFetchGenRef.current) return
+          if (activeTabRef.current !== 'callbacks') return
           if (listResult.success) {
             total = Number(listResult.data?.total) || 0
             items = Array.isArray(listResult.data?.items) ? listResult.data.items : []
@@ -596,6 +647,8 @@ function HumanQueuePageContent() {
 
         setCallbacks(items)
         setCallbackTotal(total)
+      } else if (!silent) {
+        setCallbacksError(true)
       }
       if (statsResult.success && statsResult.data) {
         setCallbackStats({
@@ -604,11 +657,29 @@ function HumanQueuePageContent() {
           called: statsResult.data.called ?? statsResult.data.resolved ?? 0,
           cancelled: statsResult.data.cancelled || 0,
         })
+      }
+      if (queueStatsResult?.success && queueStatsResult.data) {
+        setTabCounts({
+          waiting: queueStatsResult.data.waiting ?? queueStatsResult.data.unassigned ?? 0,
+          active: queueStatsResult.data.active
+            ?? ((queueStatsResult.data.assigned || 0) + (queueStatsResult.data.transferred || 0))
+            ?? 0,
+          resolved: queueStatsResult.data.resolved ?? 0,
+          callbacks: statsResult.success
+            ? (statsResult.data?.pending || 0)
+            : (queueStatsResult.data.callbacks ?? 0),
+        })
+        setTabCountsReady(true)
+      } else if (statsResult.success && statsResult.data) {
         setTabCounts((prev) => ({ ...prev, callbacks: statsResult.data.pending || 0 }))
+        setTabCountsReady(true)
       }
       if (agentsResult?.success) applyAgentsPermissionPayload(agentsResult.data)
     } catch (error) {
       console.error(error)
+      if (!silent && gen === callbackFetchGenRef.current && activeTabRef.current === 'callbacks') {
+        setCallbacksError(true)
+      }
     } finally {
       if (gen === callbackFetchGenRef.current) setCallbacksLoading(false)
     }
@@ -1277,7 +1348,7 @@ function HumanQueuePageContent() {
                         ? 'bg-[var(--studio-primary-light)] text-[var(--studio-primary)]'
                         : 'bg-background text-muted-foreground',
                     )}>
-                      {tabCounts[tab.id] || 0}
+                      {tabCountsReady ? (tabCounts[tab.id] || 0) : '…'}
                     </span>
                   </button>
                 )
@@ -1368,8 +1439,9 @@ function HumanQueuePageContent() {
                 {callbacks.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border bg-background py-12 text-center text-sm text-muted-foreground">
                     <PhoneMissed className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                    No callbacks
-                    {callbackFilter ? ` · ${callbackFilter}` : ''}.
+                    {callbacksError
+                      ? 'Could not load callbacks. They will refresh automatically.'
+                      : `No callbacks${callbackFilter ? ` · ${callbackFilter}` : ''}.`}
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -1574,8 +1646,18 @@ function HumanQueuePageContent() {
             {activeTab !== 'resolved' && (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {[
-                  { label: 'Waiting', value: tabCounts.waiting || 0, icon: PhoneCall, tone: 'text-warning' },
-                  { label: 'Active', value: tabCounts.active || 0, icon: Headphones, tone: 'text-success' },
+                  {
+                    label: 'Waiting',
+                    value: tabCountsReady ? (tabCounts.waiting || 0) : '…',
+                    icon: PhoneCall,
+                    tone: 'text-warning',
+                  },
+                  {
+                    label: 'Active',
+                    value: tabCountsReady ? (tabCounts.active || 0) : '…',
+                    icon: Headphones,
+                    tone: 'text-success',
+                  },
                   { label: 'Online agents', value: `${onlineAgents.length}/${agents.length}`, icon: Users, tone: 'text-[var(--studio-primary)]' },
                 ].map((stat) => (
                   <div key={stat.label} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
@@ -1612,7 +1694,9 @@ function HumanQueuePageContent() {
                   <div className="space-y-2">
                     {escalations.length === 0 ? (
                       <div className="rounded-xl border border-dashed border-border bg-background py-10 text-center text-sm text-muted-foreground">
-                        No resolved calls yet.
+                        {queueListError
+                          ? 'Could not load resolved calls. They will refresh automatically.'
+                          : 'No resolved calls yet.'}
                       </div>
                     ) : (
                       escalations.map((item) => {
@@ -1688,8 +1772,11 @@ function HumanQueuePageContent() {
                 <div className="space-y-2">
                   {escalations.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-border bg-background py-10 text-center text-sm text-muted-foreground">
-                      {activeTab === 'waiting' && 'No callers waiting.'}
-                      {activeTab === 'active' && 'No active calls right now.'}
+                      {queueListError
+                        ? 'Could not load calls. They will refresh automatically.'
+                        : activeTab === 'waiting'
+                          ? 'No callers waiting.'
+                          : 'No active calls right now.'}
                     </div>
                   ) : (
                     escalations.map((item) => {

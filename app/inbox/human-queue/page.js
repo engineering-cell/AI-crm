@@ -373,6 +373,9 @@ function HumanQueuePageContent() {
   const [tabCounts, setTabCounts] = useState({
     waiting: 0, active: 0, resolved: 0, callbacks: 0,
   })
+  // False until the first stats response for this page load — avoids a false
+  // 0 on Resolved after a branch switch while the location stamp is still running.
+  const [tabCountsReady, setTabCountsReady] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
 
   const [voiceSetupReady, setVoiceSetupReady] = useState(null)
@@ -510,8 +513,23 @@ function HumanQueuePageContent() {
       const queueResult = results[0]
       const agentsResult = results[1]
       const statsResult = results[2]
-      // Callbacks is a different list. A slow queue response must not replace it
-      // or put this tab's count on a list the user is no longer looking at.
+
+      if (agentsResult?.success) applyAgentsPermissionPayload(agentsResult.data)
+      // Same stats on every queue tab, so Resolved updates without opening it.
+      // A newer request already replaced this one — do not write its numbers.
+      if (statsResult.success && statsResult.data) {
+        setTabCounts({
+          waiting: statsResult.data.waiting ?? statsResult.data.unassigned ?? 0,
+          active: statsResult.data.active
+            ?? ((statsResult.data.assigned || 0) + (statsResult.data.transferred || 0))
+            ?? 0,
+          resolved: statsResult.data.resolved ?? 0,
+          callbacks: statsResult.data.callbacks ?? 0,
+        })
+        setTabCountsReady(true)
+      }
+
+      // Callbacks is a different list. A slow queue response must not replace it.
       const viewingThisTab = activeTabRef.current === requestedTab
 
       if (viewingThisTab && queueResult.success) {
@@ -568,19 +586,6 @@ function HumanQueuePageContent() {
           }
         }
       }
-
-      if (agentsResult?.success) applyAgentsPermissionPayload(agentsResult.data)
-      if (activeTabRef.current === requestedTab && statsResult.success && statsResult.data) {
-        setTabCounts((prev) => ({
-          waiting: statsResult.data.waiting ?? statsResult.data.unassigned ?? prev.waiting ?? 0,
-          active: statsResult.data.active
-            ?? ((statsResult.data.assigned || 0) + (statsResult.data.transferred || 0))
-            ?? prev.active
-            ?? 0,
-          resolved: statsResult.data.resolved ?? prev.resolved ?? 0,
-          callbacks: statsResult.data.callbacks ?? prev.callbacks ?? 0,
-        }))
-      }
     } catch (error) {
       console.error(error)
       if (!silent && gen === queueFetchGenRef.current && activeTabRef.current === requestedTab) {
@@ -613,8 +618,9 @@ function HumanQueuePageContent() {
       }
 
       let listResult = await api.get(buildUrl(page))
-      const [statsResult, agentsResult] = await Promise.all([
+      const [statsResult, queueStatsResult, agentsResult] = await Promise.all([
         api.get('/api/callback-requests/stats'),
+        api.get('/api/human-queue/stats'),
         api.get('/api/human-queue/agents'),
       ])
       if (gen !== callbackFetchGenRef.current) return
@@ -651,7 +657,22 @@ function HumanQueuePageContent() {
           called: statsResult.data.called ?? statsResult.data.resolved ?? 0,
           cancelled: statsResult.data.cancelled || 0,
         })
+      }
+      if (queueStatsResult?.success && queueStatsResult.data) {
+        setTabCounts({
+          waiting: queueStatsResult.data.waiting ?? queueStatsResult.data.unassigned ?? 0,
+          active: queueStatsResult.data.active
+            ?? ((queueStatsResult.data.assigned || 0) + (queueStatsResult.data.transferred || 0))
+            ?? 0,
+          resolved: queueStatsResult.data.resolved ?? 0,
+          callbacks: statsResult.success
+            ? (statsResult.data?.pending || 0)
+            : (queueStatsResult.data.callbacks ?? 0),
+        })
+        setTabCountsReady(true)
+      } else if (statsResult.success && statsResult.data) {
         setTabCounts((prev) => ({ ...prev, callbacks: statsResult.data.pending || 0 }))
+        setTabCountsReady(true)
       }
       if (agentsResult?.success) applyAgentsPermissionPayload(agentsResult.data)
     } catch (error) {
@@ -1327,7 +1348,7 @@ function HumanQueuePageContent() {
                         ? 'bg-[var(--studio-primary-light)] text-[var(--studio-primary)]'
                         : 'bg-background text-muted-foreground',
                     )}>
-                      {tabCounts[tab.id] || 0}
+                      {tabCountsReady ? (tabCounts[tab.id] || 0) : '…'}
                     </span>
                   </button>
                 )
@@ -1625,8 +1646,18 @@ function HumanQueuePageContent() {
             {activeTab !== 'resolved' && (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {[
-                  { label: 'Waiting', value: tabCounts.waiting || 0, icon: PhoneCall, tone: 'text-warning' },
-                  { label: 'Active', value: tabCounts.active || 0, icon: Headphones, tone: 'text-success' },
+                  {
+                    label: 'Waiting',
+                    value: tabCountsReady ? (tabCounts.waiting || 0) : '…',
+                    icon: PhoneCall,
+                    tone: 'text-warning',
+                  },
+                  {
+                    label: 'Active',
+                    value: tabCountsReady ? (tabCounts.active || 0) : '…',
+                    icon: Headphones,
+                    tone: 'text-success',
+                  },
                   { label: 'Online agents', value: `${onlineAgents.length}/${agents.length}`, icon: Users, tone: 'text-[var(--studio-primary)]' },
                 ].map((stat) => (
                   <div key={stat.label} className="rounded-2xl border border-border bg-card p-4 shadow-sm">

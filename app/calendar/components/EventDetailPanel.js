@@ -24,6 +24,7 @@ import LocationSelector from "@/components/shared/LocationSelector";
 import MiniStudentPanel from "./MiniStudentPanel";
 import { roundSessions } from "@/lib/utils";
 import { resolveEventPayment, isNoChargeOutcome } from "@/lib/event-payment";
+import { describeBooking } from "@/lib/booking-info";
 import CreateEnrollmentSheet from "@/components/enrollment/CreateEnrollmentSheet";
 import GroupClassDrawer from "@/app/calendar/group-classes/components/GroupClassDrawer";
 
@@ -2272,6 +2273,36 @@ export default function EventDetailPanel({
                       </p>
                     </div>
                   )}
+
+                  {(() => {
+                    const booking = describeBooking(event);
+                    if (!booking.by && !booking.at) return null;
+                    return (
+                      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 space-y-0.5">
+                        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                          Booked
+                        </p>
+                        <p className="text-[13px] text-foreground">
+                          {booking.by ? (
+                            <>
+                              by <span className="font-semibold">{booking.by}</span>
+                              {booking.email ? (
+                                <span className="text-muted-foreground"> ({booking.email})</span>
+                              ) : null}
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">Booked by: not recorded</span>
+                          )}
+                        </p>
+                        {booking.at ? (
+                          <p className="text-[12px] text-muted-foreground">
+                            {formatDisplayDate(booking.at, studioTz)} at{" "}
+                            {formatDisplayTime(booking.at, studioTz)}
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
 
                   {event.payment?.collected && (
                     <div className="rounded-lg border border-success/40 bg-success/5 px-3 py-2 flex items-center justify-between gap-2">

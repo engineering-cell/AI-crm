@@ -16,7 +16,6 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { cn, formatDateTime, getInitials } from '@/lib/utils'
 import {
-  disconnectConnection,
   isConnectionMuted,
   muteConnection,
   subscribeToConnectionEvents,
@@ -56,8 +55,18 @@ export default function ActiveCallPanel({
   canManage = true,
   mode = 'queue', // 'queue' | 'outbound'
   layerZIndex = 60,
+  /** When set, minimize is controlled by the parent (survives remounts). */
+  minimized: minimizedProp,
+  onMinimizedChange,
 }) {
-  const [minimized, setMinimized] = useState(false)
+  const [localMinimized, setLocalMinimized] = useState(false)
+  const minimizedControlled = typeof minimizedProp === 'boolean'
+  const minimized = minimizedControlled ? minimizedProp : localMinimized
+  const setMinimized = (next) => {
+    const value = Boolean(next)
+    if (!minimizedControlled) setLocalMinimized(value)
+    onMinimizedChange?.(value)
+  }
   const [muted, setMuted] = useState(false)
   const [callerOnHold, setCallerOnHold] = useState(false)
 
@@ -69,15 +78,9 @@ export default function ActiveCallPanel({
     setMuted(isConnectionMuted(connection))
 
     return subscribeToConnectionEvents(connection, {
-      accept: () => {},
       mute: (isMuted) => setMuted(isMuted),
-      // Outbound inbox owns teardown (local vs remote hangup messaging).
-      disconnect: () => {
-        if (mode === 'outbound') return
-        onClose?.()
-      },
     })
-  }, [connection, onClose, mode])
+  }, [connection])
 
   const handleToggleMute = () => {
     const next = !muted
@@ -96,13 +99,8 @@ export default function ActiveCallPanel({
   }
 
   const handleHangUp = () => {
-    // Outbound: parent sets the "ending" guard then disconnects, so we don't
-    // mis-label a CRM hangup as "other party disconnected".
-    if (mode === 'outbound') {
-      onEndCall?.()
-      return
-    }
-    disconnectConnection(connection)
+    // Parent owns disconnect (outbound and queue) so it can set an ending
+    // guard before teardown and avoid a duplicate "caller hung up" toast.
     onEndCall?.()
   }
 

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import GlobalLoader from '@/components/shared/GlobalLoader'
 import SuccessEvaluationDisplay from '@/components/ai-calling/SuccessEvaluationDisplay'
 import AiCallRecordingPlayer from '@/components/ai-calling/AiCallRecordingPlayer'
+import ResolvedLeadSidebar from '@/components/human-queue/ResolvedLeadSidebar'
 import { cn, formatDateTime, getInitials } from '@/lib/utils'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { formatStudioTime } from '@/lib/studioLocalDate'
@@ -72,7 +73,7 @@ function getStereoUrl(call) {
  * Full call history detail (recording + transcript) for a resolved Human Queue item.
  * Loads AiCallDetail via the queue item's vapiCallId + human conference recording.
  */
-export default function ResolvedCallDetail({ queueItem, onBack }) {
+export default function ResolvedCallDetail({ queueItem, onBack, canManage = false }) {
   const [call, setCall] = useState(null)
   const [freshItem, setFreshItem] = useState(queueItem || null)
   const [loading, setLoading] = useState(true)
@@ -81,6 +82,7 @@ export default function ResolvedCallDetail({ queueItem, onBack }) {
   const [humanAudioUrl, setHumanAudioUrl] = useState(null)
   const [humanAudioError, setHumanAudioError] = useState(null)
   const [humanAudioLoading, setHumanAudioLoading] = useState(false)
+  const [leadSidebarOpen, setLeadSidebarOpen] = useState(false)
 
   const activeItem = freshItem || queueItem
   const vapiCallId = activeItem?.vapiCallId || null
@@ -265,8 +267,26 @@ export default function ResolvedCallDetail({ queueItem, onBack }) {
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0">
-                  <p className="text-lg font-semibold text-foreground truncate">{callerName}</p>
-                  <p className="text-sm text-muted-foreground truncate">{callerPhone}</p>
+                  <button
+                    type="button"
+                    onClick={() => setLeadSidebarOpen(true)}
+                    className="block max-w-full text-left text-lg font-semibold text-foreground truncate hover:text-[var(--studio-primary)] hover:underline underline-offset-2"
+                    title="Open lead profile"
+                  >
+                    {callerName}
+                  </button>
+                  {callerPhone ? (
+                    <button
+                      type="button"
+                      onClick={() => setLeadSidebarOpen(true)}
+                      className="block max-w-full text-left text-sm text-muted-foreground truncate hover:text-[var(--studio-primary)] hover:underline underline-offset-2"
+                      title="Open lead profile"
+                    >
+                      {callerPhone}
+                    </button>
+                  ) : (
+                    <p className="text-sm text-muted-foreground truncate">—</p>
+                  )}
                   {activeItem?.intent && (
                     <p className="text-xs text-muted-foreground mt-1 truncate">{activeItem.intent}</p>
                   )}
@@ -442,6 +462,15 @@ export default function ResolvedCallDetail({ queueItem, onBack }) {
           </div>
         </div>
       )}
+
+      <ResolvedLeadSidebar
+        open={leadSidebarOpen}
+        onClose={() => setLeadSidebarOpen(false)}
+        queueItemId={queueItemId}
+        fallbackName={callerName}
+        fallbackPhone={callerPhone}
+        canManage={canManage}
+      />
     </div>
   )
 }

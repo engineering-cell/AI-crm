@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { PhoneCall, X } from 'lucide-react'
 import api from '@/lib/api'
 import { getCurrentUser } from '@/lib/auth'
@@ -9,6 +9,7 @@ import { hasPermission } from '@/lib/permissions'
 import { isNotificationEnabled } from '@/lib/notificationPreferences'
 import { startIncomingRingLoop, stopIncomingRingLoop } from '@/lib/notificationSounds'
 import { getActiveConnection } from '@/lib/twilioVoiceClient'
+import { shouldShowIncomingCallPopup, useLiveQueueCall } from '@/lib/liveQueueCallStore'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { cn, getInitials } from '@/lib/utils'
 
@@ -26,12 +27,12 @@ function sameEmail(a, b) {
 
 /**
  * App-wide incoming-call popup for online Call Center agents.
- * Mounted from MainLayout — no-ops when the user cannot read Call Center.
+ * Mounted from LiveCallHost (Providers) — no-ops when the user cannot read Call Center.
+ * Stays visible on every route/tab until dismissed or the caller leaves waiting.
  */
 export default function GlobalIncomingCallAlert() {
   const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
+  const liveQueue = useLiveQueueCall()
   const [enabled, setEnabled] = useState(false)
   const [online, setOnline] = useState(false)
   const [canAnswer, setCanAnswer] = useState(false)
@@ -44,11 +45,6 @@ export default function GlobalIncomingCallAlert() {
   const wasRingingRef = useRef(false)
 
   const canReadCallCenter = hasPermission('inbox', 'CallCenter', 'read')
-
-  const queueTab = (searchParams?.get('tab') || 'waiting').toLowerCase()
-  const onCallCenterWaiting =
-    pathname === '/inbox/human-queue'
-    && (queueTab === 'waiting' || queueTab === 'escalations' || queueTab === 'unassigned')
 
   const refreshAgents = useCallback(async () => {
     if (stopPollingRef.current || !canReadCallCenter) return
@@ -152,11 +148,13 @@ export default function GlobalIncomingCallAlert() {
 
   // Keep Answer/ring in sync when Twilio connection starts on another page surface
   useEffect(() => {
-    const tick = () => setAlreadyOnCall(Boolean(getActiveConnection()))
+    const tick = () => setAlreadyOnCall(
+      Boolean(getActiveConnection()) || Boolean(liveQueue?.call),
+    )
     tick()
     const id = setInterval(tick, 1500)
     return () => clearInterval(id)
-  }, [])
+  }, [liveQueue?.call])
 
   const visibleWaiting = waiting.filter((item) => {
     const id = waitingItemId(item)
@@ -164,7 +162,16 @@ export default function GlobalIncomingCallAlert() {
   })
   const nextCall = visibleWaiting[0] || null
   const nextId = nextCall ? waitingItemId(nextCall) : ''
-  const showPopup = Boolean(nextCall && enabled && online && canAnswer && !onCallCenterWaiting)
+  // Hide only while the live panel is expanded. A minimized call still leaves
+  // room for the next waiting caller, docked above the bar.
+  const showPopup = shouldShowIncomingCallPopup({
+    nextCall,
+    enabled,
+    online,
+    canAnswer,
+    call: liveQueue?.call,
+    minimized: liveQueue?.minimized,
+  })
 
   // Ring loop while any waiting call exists for an online agent (including Call Center waiting tab)
   useEffect(() => {
@@ -265,7 +272,10 @@ export default function GlobalIncomingCallAlert() {
 
   return (
     <div
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-[400] flex justify-center p-4 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:justify-end sm:p-0"
+      className={cn(
+        'pointer-events-none fixed inset-x-0 z-[400] flex justify-center p-4 sm:inset-x-auto sm:right-6 sm:justify-end sm:p-0',
+        liveQueue?.call && liveQueue?.minimized ? 'bottom-24 sm:bottom-28' : 'bottom-0 sm:bottom-6',
+      )}
       role="alert"
       aria-live="assertive"
     >

@@ -23,7 +23,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import LocationSelector from "@/components/shared/LocationSelector";
 import MiniStudentPanel from "./MiniStudentPanel";
 import { roundSessions } from "@/lib/utils";
-import { resolveEventPayment } from "@/lib/event-payment";
+import { resolveEventPayment, isNoChargeOutcome } from "@/lib/event-payment";
 import CreateEnrollmentSheet from "@/components/enrollment/CreateEnrollmentSheet";
 import GroupClassDrawer from "@/app/calendar/group-classes/components/GroupClassDrawer";
 
@@ -157,7 +157,7 @@ function isUnallocated(event) {
 // `ev` must be the event as GET /api/calendar/:id returns it (packages populated);
 // `ctx` is the calendar's buildPackageSessionOrder() of the events it loaded.
 function chargeCoversPayment(ch, ev, ctx) {
-  if (ch.method !== "package") return true;
+  if (ch.method !== "package" && !isNoChargeOutcome(ev)) return true;
   return resolveEventPayment(ev, { ...ctx, customerID: ch.customerID }).paid;
 }
 

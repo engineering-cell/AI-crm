@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { readPersistedListState, usePersistListState } from '@/lib/hooks/useListStatePersistence'
-import { PhoneCall, Users, UserPlus, AlarmClock, CalendarClock, CalendarCheck2 } from 'lucide-react'
+import { Phone, Mail, MessageSquare, PhoneCall, Users, UserPlus, AlarmClock, CalendarClock, CalendarCheck2 } from 'lucide-react'
 import MainLayout from '@/components/layout/MainLayout'
 import { Input } from '@/components/ui/input'
 import SearchInput from '@/components/ui/search-input'
@@ -16,6 +16,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import LeadsDialog from '@/app/leads/components/LeadsDialog'
+import LeadCommunicationDialog from '@/components/leads/LeadCommunicationDialog'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import api from '@/lib/api'
 import { cn, formatDate } from '@/lib/utils'
@@ -101,6 +102,7 @@ export default function CallbackReportPage() {
   const [summaryLoading, setSummaryLoading] = useState(true)
 
   const [viewLeadId, setViewLeadId] = useState(null)
+  const [communication, setCommunication] = useState(null) // { lead, channel }
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 350)
@@ -236,7 +238,7 @@ export default function CallbackReportPage() {
   }
 
   const hasActiveFilters = Boolean(search || fromDate || toDate || stage || studentStatus)
-  const colCount = tab === 'leads' ? 5 : 4
+  const colCount = tab === 'leads' ? 6 : 5
 
   return (
     <MainLayout title="Callback Report" subtitle="Leads and customers with an upcoming or overdue callback date">
@@ -380,6 +382,7 @@ export default function CallbackReportPage() {
                 {tab === 'leads' && (
                   <TableHead className="py-3 px-4 text-xs font-medium text-muted-foreground">Stage</TableHead>
                 )}
+                <TableHead className="py-3 px-4 text-xs font-medium text-muted-foreground">Communication</TableHead>
                 <TableHead className="py-3 px-4 text-xs font-medium text-muted-foreground">Callback Date</TableHead>
               </TableRow>
             </TableHeader>
@@ -433,6 +436,26 @@ export default function CallbackReportPage() {
                         </StatusColorBadge>
                       </TableCell>
                     )}
+                    <TableCell className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                        {[
+                          { channel: 'Call', icon: Phone, count: row.calls, label: 'calls' },
+                          { channel: 'Email', icon: Mail, count: row.emails, label: 'emails' },
+                          { channel: 'SMS', icon: MessageSquare, count: row.chats, label: 'messages' },
+                        ].map(({ channel, icon: Icon, count, label }) => (
+                          <button
+                            key={channel}
+                            type="button"
+                            onClick={() => setCommunication({ lead: row, channel, contactType: tab === 'leads' ? 'Lead' : 'Customer' })}
+                            title={`Open ${label}`}
+                            className="flex items-center gap-1 rounded-md px-1.5 py-1 transition-colors hover:bg-[var(--studio-primary)]/10 hover:text-[var(--studio-primary)]"
+                          >
+                            <Icon className="h-3.5 w-3.5" />
+                            {count ?? 0}
+                          </button>
+                        ))}
+                      </div>
+                    </TableCell>
                     <TableCell className="py-3 px-4">
                       <CallbackBadge date={row.callbackDate} />
                     </TableCell>
@@ -466,6 +489,15 @@ export default function CallbackReportPage() {
         </div>
       </div>
 
+      <LeadCommunicationDialog
+        lead={communication?.lead}
+        channel={communication?.channel}
+        contactType={communication?.contactType}
+        onClose={() => {
+          setCommunication(null)
+          fetchRows()
+        }}
+      />
       <LeadsDialog
         open={Boolean(viewLeadId)}
         onClose={() => setViewLeadId(null)}

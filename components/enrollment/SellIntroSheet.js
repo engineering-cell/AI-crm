@@ -30,6 +30,39 @@ const LINK_CHANNELS = [
   { value: 'both', label: 'Both' },
 ]
 
+function sessionKey(s) {
+  return String(s.sessionID || s._id || '')
+}
+
+function money(n) {
+  const value = Number(n)
+  if (!Number.isFinite(value)) return '0'
+  return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2)
+}
+
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+function formatClock(hhmm) {
+  if (!hhmm || !hhmm.includes(':')) return ''
+  const [h, m] = hhmm.split(':').map(Number)
+  if (!Number.isFinite(h)) return hhmm
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
+}
+
+function scheduleStillRunning(schedule) {
+  if (!schedule?.endDate) return true
+  return schedule.endDate >= new Date().toLocaleDateString('en-CA')
+}
+
+function formatSessionDate(s) {
+  const day = s.localDay || ''
+  const date = s.localDate
+    ? new Date(`${s.localDate}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    : ''
+  const time = s.localTime || ''
+  return [day, date].filter(Boolean).join(', ') + (time ? ` · ${time}` : '')
+}
+
 function locationMatches(service, locationID) {
   if (!locationID) return true
   const locs = Array.isArray(service.locationID) ? service.locationID : [service.locationID]
@@ -44,7 +77,14 @@ export default function SellIntroSheet({ open, onClose, onSuccess }) {
   const [selectedContactKey, setSelectedContactKey] = useState('')
   const [introCatalog, setIntroCatalog] = useState([])
   const [catalogLoading, setCatalogLoading] = useState(false)
+  const [saleKind, setSaleKind] = useState('intro')
   const [selectedIntroID, setSelectedIntroID] = useState('')
+  const [sessions, setSessions] = useState([])
+  const [groupLessons, setGroupLessons] = useState([])
+  const [groupSchedules, setGroupSchedules] = useState([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [selectedScheduleID, setSelectedScheduleID] = useState('')
+  const [selectedSessionID, setSelectedSessionID] = useState('')
   const [method, setMethod] = useState('link')
   const [channel, setChannel] = useState('sms')
   const [deviceID, setDeviceID] = useState('')
@@ -101,9 +141,70 @@ export default function SellIntroSheet({ open, onClose, onSuccess }) {
     [locationIntros, selectedIntroID],
   )
   const isFreeIntro =
+    saleKind === 'intro' &&
     selectedIntro != null &&
     Number.isFinite(Number(selectedIntro.price)) &&
     Number(selectedIntro.price) === 0
+
+  const groupClasses = useMemo(() => {
+    const lessonsById = new Map(
+      (Array.isArray(groupLessons) ? groupLessons : []).map((lesson) => [String(lesson._id), lesson]),
+    )
+    return (Array.isArray(groupSchedules) ? groupSchedules : [])
+      .filter(scheduleStillRunning)
+      .map((schedule) => {
+        const lessonId = String(schedule.lessonID?._id || schedule.lessonID || '')
+        const lesson = lessonsById.get(lessonId) || (typeof schedule.lessonID === 'object' ? schedule.lessonID : {})
+        const listedPrice = Number(lesson.calendarServiceID?.price)
+        const sessionPrice = (Array.isArray(sessions) ? sessions : []).find(
+          (session) =>
+            String(session.scheduleID) === String(schedule._id) && Number(session.dropInPrice) > 0,
+        )?.dropInPrice
+        const price = Number.isFinite(listedPrice) && listedPrice > 0 ? listedPrice : Number(sessionPrice)
+        const loc = schedule.locationID
+        const scheduleLocationID = loc ? String(loc._id || loc) : null
+        const days = (schedule.daysOfWeek || [])
+          .slice()
+          .sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7))
+          .map((day) => WEEKDAY_LABELS[day])
+          .filter(Boolean)
+          .join(', ')
+        return {
+          scheduleID: String(schedule._id),
+          name: lesson.name || 'Group class',
+          color: lesson.color || null,
+          price: Number.isFinite(price) && price > 0 ? price : null,
+          locationID: scheduleLocationID,
+          days,
+          time: formatClock(schedule.startTime),
+          teacher: schedule.teacherID?.name ? String(schedule.teacherID.name).split(' ')[0] : null,
+          draft: schedule.status !== 'published',
+          inactive: lesson.isActive === false,
+        }
+      })
+      .filter((row) => {
+        if (!locationID) return true
+        return !row.locationID || row.locationID === String(locationID)
+      })
+      .sort((a, b) => a.name.localeCompare(b.name) || a.time.localeCompare(b.time))
+  }, [groupLessons, groupSchedules, sessions, locationID])
+
+  const selectedGroupClass = useMemo(
+    () => groupClasses.find((row) => row.scheduleID === String(selectedScheduleID)) || null,
+    [groupClasses, selectedScheduleID],
+  )
+
+  const datesForClass = useMemo(() => {
+    if (!selectedGroupClass) return []
+    return (Array.isArray(sessions) ? sessions : []).filter(
+      (session) => String(session.scheduleID) === selectedGroupClass.scheduleID && !session.cancelled,
+    )
+  }, [sessions, selectedGroupClass])
+
+  const selectedSession = useMemo(
+    () => datesForClass.find((s) => sessionKey(s) === String(selectedSessionID) && s.spotsLeft !== 0) || null,
+    [datesForClass, selectedSessionID],
+  )
 
   useEffect(() => {
     if (!open) return
@@ -112,7 +213,10 @@ export default function SellIntroSheet({ open, onClose, onSuccess }) {
     setResult(null)
     setWarning(null)
     setSelectedContactKey('')
+    setSaleKind('intro')
     setSelectedIntroID('')
+    setSelectedScheduleID('')
+    setSelectedSessionID('')
     setMethod('link')
     setChannel('sms')
     setDeviceID('')
@@ -126,12 +230,18 @@ export default function SellIntroSheet({ open, onClose, onSuccess }) {
 
     async function load() {
       setCatalogLoading(true)
-      const [leadsRes, customersRes, introsRes, teachersRes, locationsRes] = await Promise.all([
+      setSessionsLoading(true)
+      const from = new Date()
+      const [leadsRes, customersRes, introsRes, teachersRes, locationsRes, sessionsRes, lessonsRes, schedulesRes] =
+        await Promise.all([
         api.get('/api/lead?limit=200&page=1'),
         api.get('/api/customer?limit=200&page=1'),
         api.get('/api/calendar-service?type=intro&limit=200'),
         api.get('/api/teacher?limit=200&status=active'),
         api.get('/api/location?limit=50'),
+        api.get(`/api/class-schedule/sessions?start=${from.toISOString()}&days=90`),
+        api.get('/api/lesson?limit=500'),
+        api.get('/api/class-schedule'),
       ])
       if (cancelled) return
 
@@ -223,7 +333,11 @@ export default function SellIntroSheet({ open, onClose, onSuccess }) {
         setLocationsById({})
       }
 
+      setSessions(sessionsRes?.success && Array.isArray(sessionsRes.data) ? sessionsRes.data : [])
+      setGroupLessons(lessonsRes?.success && Array.isArray(lessonsRes.data) ? lessonsRes.data : [])
+      setGroupSchedules(schedulesRes?.success && Array.isArray(schedulesRes.data) ? schedulesRes.data : [])
       setCatalogLoading(false)
+      setSessionsLoading(false)
     }
 
     load()
@@ -291,7 +405,87 @@ export default function SellIntroSheet({ open, onClose, onSuccess }) {
     onClose?.()
   }
 
+  async function submitGroupSale() {
+    if (!selectedContact) {
+      setError('Please select a lead or customer.')
+      return
+    }
+    if (!selectedGroupClass) {
+      setError('Select a group class.')
+      return
+    }
+    if (!selectedGroupClass.price) {
+      setError('That class has no drop-in price. Set one on the class before selling it.')
+      return
+    }
+    if (!selectedSession) {
+      setError('Select a date for that class.')
+      return
+    }
+    if (method === 'link') {
+      if (channel !== 'email' && !selectedContact?.phoneNumber) {
+        setError('This contact has no phone number — pick Email or add a phone first.')
+        return
+      }
+      if (channel !== 'sms' && !selectedContact?.email) {
+        setError('This contact has no email — pick SMS or add an email first.')
+        return
+      }
+    }
+    if (method === 'terminal' && !deviceID) {
+      setError('Select a terminal to charge.')
+      return
+    }
+
+    setError('')
+    setSubmitting(true)
+    setResult(null)
+
+    const body = {
+      classSessionID: sessionKey(selectedSession),
+      method,
+      ...(selectedContact.leadID ? { leadID: selectedContact.leadID } : {}),
+      ...(selectedContact.customerID ? { customerID: selectedContact.customerID } : {}),
+      ...(method === 'link' ? { channel } : {}),
+      ...(method === 'terminal' ? { billing: { deviceID, ...terminalTipPayload() } } : {}),
+    }
+
+    try {
+      const res = await api.post('/api/payment-request/group-class', body)
+      if (!res?.success) {
+        setError(res?.error || 'Failed to sell the group class.')
+        setSubmitting(false)
+        return
+      }
+
+      const data = res.data || {}
+      setResult({
+        method,
+        message: res.message || 'Done',
+        checkoutUrl: data.checkoutUrl || null,
+        customerID: data.customerID || selectedContact.customerID || null,
+        pending: Boolean(data.pending),
+      })
+
+      if (method === 'link') toast.success('Group class payment link sent.')
+      else if (method === 'cash') toast.success('Group class sold — cash collected.')
+      else if (method === 'card') toast.success('Checkout opened — complete payment on the card page.')
+      else if (data.pending) toast.success('Charge sent to the reader — waiting for the card.')
+      else toast.success('Group class sold — terminal payment collected.')
+
+      onSuccess?.(data)
+    } catch (err) {
+      setError(err?.message || 'Failed to sell the group class.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   async function submitSale({ confirmOverride = false } = {}) {
+    if (saleKind === 'group') {
+      await submitGroupSale()
+      return
+    }
     if (!selectedContact) {
       setError('Please select a lead or customer.')
       return
@@ -429,10 +623,10 @@ export default function SellIntroSheet({ open, onClose, onSuccess }) {
     <Sheet open={open} onClose={handleClose} width={SHEET_WIDTH}>
       <SheetContent onClose={handleClose} className="flex flex-col overflow-hidden p-0">
         <div className="shrink-0 border-b border-border bg-muted/30 px-5 pt-5 pb-3">
-          <p className="text-[14px] font-bold text-foreground">Sell Trial / Intro</p>
+          <p className="text-[14px] font-bold text-foreground">Sell intro or group</p>
           <p className="text-[12px] text-muted-foreground mt-1">
-            Sell a Setup intro to a lead or customer — share a payment link or collect cash, card, or
-            terminal in person.
+            Sell a Setup intro or one group-class drop-in — share a payment link or collect cash, card,
+            or terminal in person.
           </p>
         </div>
 
@@ -530,8 +724,145 @@ export default function SellIntroSheet({ open, onClose, onSuccess }) {
               </div>
 
               <div className="rounded-xl border border-border bg-card p-3 space-y-2">
-                <p className="text-[11px] font-medium text-muted-foreground">Intro</p>
-                {catalogLoading ? (
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-medium text-muted-foreground">What to sell</p>
+                  <div className="inline-flex rounded-lg border border-border bg-background p-0.5">
+                    {[
+                      { value: 'intro', label: 'Intro' },
+                      { value: 'group', label: 'Group class' },
+                    ].map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => {
+                          setSaleKind(option.value)
+                          setError('')
+                          setWarning(null)
+                        }}
+                        className={[
+                          'h-7 px-2.5 rounded-md text-[11px] font-medium transition-colors',
+                          saleKind === option.value
+                            ? 'bg-brand text-brand-foreground'
+                            : 'text-muted-foreground hover:text-foreground',
+                        ].join(' ')}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {saleKind === 'group' ? (
+                  sessionsLoading ? (
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Loading classes…
+                    </p>
+                  ) : groupClasses.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      No group classes
+                      {locationID ? ' for this location' : ''}. Create one in Group classes first.
+                    </p>
+                  ) : (
+                    <>
+                    <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                      {groupClasses.map((groupClass) => {
+                        const isSelected = groupClass.scheduleID === String(selectedScheduleID)
+                        const detail = [groupClass.days, groupClass.time, groupClass.teacher && `with ${groupClass.teacher}`]
+                          .filter(Boolean)
+                          .join(' · ')
+                        return (
+                          <button
+                            key={groupClass.scheduleID}
+                            type="button"
+                            disabled={groupClass.inactive || !groupClass.price}
+                            onClick={() => {
+                              setSelectedScheduleID(groupClass.scheduleID)
+                              setSelectedSessionID('')
+                              setError('')
+                            }}
+                            className={[
+                              'flex w-full items-center justify-between rounded-lg border px-2.5 py-2 text-left transition-colors',
+                              groupClass.inactive || !groupClass.price ? 'cursor-not-allowed opacity-60' : '',
+                              isSelected
+                                ? 'border-brand bg-brand/10'
+                                : 'border-border bg-background hover:bg-muted/40',
+                            ].join(' ')}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className="h-2.5 w-2.5 rounded-full shrink-0"
+                                style={{ background: groupClass.color || 'var(--studio-primary)' }}
+                              />
+                              <span className="min-w-0">
+                                <span className="block truncate text-[12px] font-medium">
+                                  {groupClass.name}
+                                  {groupClass.inactive ? ' · Inactive' : groupClass.draft ? ' · Draft' : ''}
+                                </span>
+                                {detail && (
+                                  <span className="block truncate text-[11px] text-muted-foreground">
+                                    {detail}
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                            <span className="text-[12px] font-semibold shrink-0 ml-2">
+                              {groupClass.price ? `$${money(groupClass.price)}` : 'No price'}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {selectedGroupClass && (
+                      <div className="space-y-1.5 border-t border-border pt-2">
+                        <p className="text-[11px] font-medium text-muted-foreground">
+                          Date for {selectedGroupClass.name}
+                        </p>
+                        {datesForClass.length === 0 ? (
+                          <p className="text-[11px] text-muted-foreground">
+                            No upcoming date in the next 90 days.
+                          </p>
+                        ) : (
+                          <div className="max-h-48 space-y-1.5 overflow-y-auto">
+                          {datesForClass.map((session) => {
+                            const id = sessionKey(session)
+                            const full = session.spotsLeft === 0
+                            const isSelected = !full && id === String(selectedSessionID)
+                            const spots =
+                              session.spotsLeft == null
+                                ? 'Open'
+                                : full
+                                  ? 'Full'
+                                  : `${session.spotsLeft} spot${session.spotsLeft === 1 ? '' : 's'} left`
+                            return (
+                              <button
+                                key={id}
+                                type="button"
+                                disabled={full}
+                                onClick={() => setSelectedSessionID(id)}
+                                className={[
+                                  'flex w-full items-center justify-between rounded-lg border px-2.5 py-2 text-left transition-colors',
+                                  full ? 'cursor-not-allowed opacity-50' : '',
+                                  isSelected
+                                    ? 'border-brand bg-brand/10'
+                                    : 'border-border bg-background hover:bg-muted/40',
+                                ].join(' ')}
+                              >
+                                <span className="min-w-0 truncate text-[12px] font-medium">
+                                  {formatSessionDate(session)}
+                                </span>
+                                <span className="shrink-0 ml-2 text-[11px] text-muted-foreground">
+                                  {spots}
+                                </span>
+                              </button>
+                            )
+                          })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                  )
+                ) : catalogLoading ? (
                   <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     Loading intros…
@@ -584,7 +915,7 @@ export default function SellIntroSheet({ open, onClose, onSuccess }) {
                     })}
                   </div>
                 )}
-                {selectedIntro && (
+                {saleKind === 'intro' && selectedIntro && (
                   <p className="text-[11px] text-muted-foreground">
                     Price locked from Setup — staff cannot override.
                   </p>
@@ -653,6 +984,7 @@ export default function SellIntroSheet({ open, onClose, onSuccess }) {
                 )}
               </div>
 
+              {saleKind === 'intro' && (
               <div className="rounded-xl border border-border bg-card p-3 space-y-3">
                 <label className="flex items-center gap-2 text-[12px] font-medium text-foreground">
                   <input
@@ -700,6 +1032,7 @@ export default function SellIntroSheet({ open, onClose, onSuccess }) {
                   </>
                 )}
               </div>
+              )}
 
               {error && (
                 <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2 text-[12px] text-destructive">

@@ -1,13 +1,34 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { TrendingUp, TrendingDown, Lock, BarChart3 } from 'lucide-react'
+
+/* ── report IDs (spec: "Show report IDs" overlay, bottom-right) ───────────── */
+
+export const ReportIdsContext = createContext(false)
+
+/** Small ID label (K-01, R-01 …) shown only while the page's "Show report IDs" toggle is on. */
+export function IdBadge({ id }) {
+  const show = useContext(ReportIdsContext)
+  if (!show || !id) return null
+  return (
+    <span data-rid={id} className="rounded bg-[#4A3352] px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white">
+      {id}
+    </span>
+  )
+}
 
 /* ── formatters ─────────────────────────────────────────────────────────── */
 
 export function money(n) {
   const v = Number(n) || 0
   return `$${Math.round(v).toLocaleString()}`
+}
+
+/** Exact money to the cent, for figures people check against an account (outstanding balances). */
+export function moneyExact(n) {
+  const v = Number(n) || 0
+  return `${v < 0 ? '−' : ''}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 /** Compact money for axis ticks and dense bar rows. */
@@ -56,14 +77,9 @@ export function useReveal() {
   return [ref, shown]
 }
 
-export function Reveal({ children, delay = 0, className = '' }) {
-  const [ref, shown] = useReveal()
-  const delayClass = delay ? `od-reveal-d${delay}` : ''
-  return (
-    <div ref={ref} className={`od-reveal ${delayClass} ${shown ? 'od-in' : ''} ${className}`.trim()}>
-      {children}
-    </div>
-  )
+/** Layout wrapper only. The design allows one animation — bars growing once on first load — so no fade or slide-in. */
+export function Reveal({ children, className = '' }) {
+  return <div className={className.trim()}>{children}</div>
 }
 
 /* ── type ───────────────────────────────────────────────────────────────── */
@@ -101,32 +117,31 @@ export function Chip({ children, ghost = false }) {
 
 /* ── section header ─────────────────────────────────────────────────────── */
 
-export function SectionHead({ number, title, emphasis, tag, subtitle }) {
+export function SectionHead({ number, title, tag, subtitle }) {
   return (
-    <Reveal className="mb-7">
-      <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
-        <span className="od-display text-[20px] italic text-[var(--studio-primary)]">{number}</span>
-        <h2 className="od-display text-[clamp(26px,3vw,40px)] leading-[1.05] text-foreground">
-          {title}{' '}
-          {emphasis && (
-            <em className="italic">
-              <Foil>{emphasis}</Foil>
-            </em>
-          )}
-        </h2>
-        {tag && (
-          <span className="ml-auto whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--studio-primary)_30%,transparent)] px-3.5 py-1.5 text-[9px] font-bold tracking-[0.26em] text-[var(--studio-primary)]">
-            {tag}
-          </span>
-        )}
-      </div>
-      {subtitle && (
-        <p className="od-display mt-3 max-w-[860px] text-[13.5px] italic leading-relaxed text-muted-foreground">
-          {subtitle}
-        </p>
-      )}
-      <div className="od-hairline mt-5" />
-    </Reveal>
+    <div className="mb-[18px] flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <h2 className="text-[19px] font-extrabold leading-tight text-foreground">{title}</h2>
+      {tag && <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{tag}</span>}
+      {subtitle && <p className="ml-auto text-[12.5px] text-muted-foreground max-[1199px]:ml-0 max-[1199px]:w-full">{subtitle}</p>}
+    </div>
+  )
+}
+
+/**
+ * Supporting lines in the design set their numbers in bold ink against grey text
+ * ("<b>34</b> active payment plans"). Wraps every figure in a string — $1,152, 78.5%, 954 — that way.
+ */
+export function Emph({ children }) {
+  if (typeof children !== 'string') return children
+  const parts = children.split(/(\$?\d[\d,]*(?:\.\d+)?(?:%| pp|K|M)?)/g)
+  return parts.map((part, i) =>
+    i % 2 ? (
+      <b key={i} className="font-semibold text-foreground">
+        {part}
+      </b>
+    ) : (
+      part
+    )
   )
 }
 
@@ -137,15 +152,16 @@ export function SectionHead({ number, title, emphasis, tag, subtitle }) {
  * useOwnerDashboardPage — `null` means we genuinely have nothing to compare
  * against, so nothing renders rather than a misleading 0%.
  */
-export function DeltaPill({ d, label }) {
-  if (!d) return null
+export function DeltaPill({ d, label, hideWhenMissing = false }) {
+  // Spec 3.3: a missing comparison shows "—", never nothing or a made-up 0.
+  if (!d) return hideWhenMissing ? null : <span title={`No ${label} comparison yet`} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold text-muted-foreground"><span className="text-[9px] font-medium uppercase tracking-[0.04em] opacity-70">{label}</span>—</span>
 
   const up = d.dir === 'up'
   const text = d.noBaseline
     ? 'New'
     : d.points
-      ? `${d.pct >= 0 ? '+' : ''}${d.pct.toFixed(1)} pp`
-      : `${d.pct >= 0 ? '+' : ''}${d.pct.toFixed(1)}%`
+      ? `${d.pct >= 0 ? '+' : '−'}${Math.abs(d.pct).toFixed(1)} pp`
+      : `${d.pct >= 0 ? '+' : '−'}${Math.abs(d.pct).toFixed(1)}%`
   const Icon = up ? TrendingUp : TrendingDown
 
   return (
@@ -174,12 +190,20 @@ export function Panel({ children, className = '' }) {
 }
 
 /** The concept's card title row: label left, note + controls right. */
-export function PanelHead({ title, note, right, detailsButton }) {
+export function PanelHead({ title, note, right, detailsButton, tag }) {
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-2">
-      <h3 className="text-[10.5px] font-bold uppercase tracking-[0.26em] text-[var(--studio-primary)]">{title}</h3>
+      <h3 className="flex items-center gap-2 text-[15px] font-extrabold uppercase text-[var(--studio-primary-dark,#7E0F47)]">
+        <IdBadge id={title.match(/^R-\d+/)?.[0]} />
+        {title.replace(/^R-\d+\s+/, '')}
+        {tag && <span className="rounded-full bg-[#9D85E8] px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] text-white">{tag}</span>}
+      </h3>
       <div className="flex flex-wrap items-center gap-2">
-        {note && <span className="text-[10px] normal-case tracking-normal text-muted-foreground">{note}</span>}
+        {note && (
+          <span className="text-[10px] normal-case tracking-normal text-muted-foreground">
+            <Emph>{note}</Emph>
+          </span>
+        )}
         {right}
         {detailsButton}
       </div>
@@ -206,7 +230,7 @@ export function NotAvailable({ message, requires, height = 200 }) {
 }
 
 /** "No rows for this period" — the data path exists, this window is just empty. */
-export function Empty({ message = 'No data for this period.', height = 200 }) {
+export function Empty({ message = 'No data for this range.', height = 200 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-4 text-center" style={{ minHeight: height }}>
       <BarChart3 className="h-6 w-6 text-muted-foreground/35" aria-hidden />

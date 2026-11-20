@@ -48,6 +48,7 @@ export default function CalendarServicesPage() {
   const [selectedIds, setSelectedIds] = useState([])
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingService, setEditingService] = useState(null)
+  const [duplicating, setDuplicating] = useState(false)
 
   const totalPages = Math.max(1, Math.ceil(totalCount / ROWS_PER_PAGE))
 
@@ -93,11 +94,20 @@ export default function CalendarServicesPage() {
   }
 
   function openCreate() {
+    setDuplicating(false)
     setEditingService(null)
     setDialogOpen(true)
   }
 
   function openEdit(service) {
+    setDuplicating(false)
+    setEditingService(service)
+    setDialogOpen(true)
+  }
+
+  // Same service (code, type, etc.) for another studio — typically with a different price.
+  function openDuplicate(service) {
+    setDuplicating(true)
     setEditingService(service)
     setDialogOpen(true)
   }
@@ -294,6 +304,7 @@ export default function CalendarServicesPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => openEdit(service)}>Edit</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openDuplicate(service)}>Duplicate</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleToggleStatus(service)}>
                               {service.isActive ? 'Deactivate' : 'Activate'}
                             </DropdownMenuItem>
@@ -340,6 +351,7 @@ export default function CalendarServicesPage() {
           open={dialogOpen}
           onClose={() => setDialogOpen(false)}
           service={editingService}
+          duplicate={duplicating}
           onRefresh={() => loadServices(currentPage, searchQuery)}
         />
       </div>

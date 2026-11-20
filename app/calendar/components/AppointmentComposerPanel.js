@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import ConflictPrompt from "./ConflictPrompt";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -1264,10 +1265,13 @@ function WhoSection({
           selectedServiceId={form.service_id}
           allServices={allServices}
           onOpenEnrollmentWizard={onOpenEnrollmentWizard}
+          // Only an intro that can still be booked covers this booking. An intro that was
+          // bought and already taken (e.g. completed weeks ago) does not, so that student
+          // still gets the "no package — nothing is charged" warning like anyone else.
           hasPurchasedIntro={Boolean(
-            introSummary?.purchased ||
-            introSummary?.purchase ||
-            (Array.isArray(introSummary?.openPurchases) && introSummary.openPurchases.length > 0),
+            Array.isArray(introSummary?.openPurchases)
+              ? introSummary.openPurchases.length > 0
+              : introSummary?.canBookOrRebook && introSummary?.purchase,
           )}
           introLookupSettled={introLookupSettled}
         />
@@ -2390,12 +2394,16 @@ export default function AppointmentComposerPanel({
   // Set when the backend answers 409 needsUnallocatedConfirm — holds everything
   // needed to re-post just the uncovered slots once staff confirm.
   const [unallocatedPrompt, setUnallocatedPrompt] = useState(null);
+  // Set when the backend answers 409 needsConflictConfirm — the teacher is already
+  // booked at one or more of the requested times. Holds the clashes plus nearby openings.
+  const [conflictPrompt, setConflictPrompt] = useState(null);
 
   useEffect(() => {
     if (!open) return;
     setActiveTab("Appointment");
     setShowEnrollmentWizard(false);
     setError(null);
+    setConflictPrompt(null);
     setLocationFetchFailed({});
     const seededEndTime = initialTime
       ? initialDuration
@@ -3201,6 +3209,35 @@ export default function AppointmentComposerPanel({
       payloads.map((p) => api.post("/api/calendar", p)),
     );
 
+    continueAfterResults(payloads, results, slotTz);
+  };
+
+  // Shared by the first save and by every retry: checks for teacher clashes first
+  // (nothing is charged for those), then for unallocated lessons, then finishes.
+  const continueAfterResults = (payloads, results, tz) => {
+    // The teacher is already booked: show the clashes and openings, and book
+    // nothing further until staff pick another time or confirm on purpose.
+    const clashing = results
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => !r.success && r.errorData?.needsConflictConfirm);
+    if (clashing.length > 0) {
+      setConflictPrompt({
+        tz,
+        payloads,
+        results,
+        indexes: clashing.map(({ i }) => i),
+        conflicts: clashing.flatMap(({ r, i }) =>
+          (r.errorData.conflicts || []).map((c) => ({ ...c, slotIndex: i })),
+        ),
+        totalOccurrences: clashing.reduce(
+          (n, { r }) => n + (r.errorData.totalOccurrences || 1),
+          0,
+        ),
+      });
+      setIsSaving(false);
+      return;
+    }
+
     // The backend refuses to book a lesson no program covers until staff say so.
     // Only the slots that actually came back needing confirmation are retried —
     // on a partially covered booking the others are already created, and
@@ -3247,6 +3284,40 @@ export default function AppointmentComposerPanel({
     });
 
     finishSave(merged);
+  };
+
+  // Re-post the clashing slots, either unchanged but explicitly allowed (booking
+  // over the clash), or moved to a suggested opening (single-date bookings only).
+  const retryConflicts = async ({ move = null } = {}) => {
+    const prompt = conflictPrompt;
+    if (!prompt) return;
+    setConflictPrompt(null);
+    setIsSaving(true);
+    setError(null);
+
+    const retried = await Promise.all(
+      prompt.indexes.map((i) =>
+        api.post("/api/calendar", {
+          ...prompt.payloads[i],
+          ...(move
+            ? { startDateTime: move.startDateTime, endDateTime: move.endDateTime }
+            : { allowConflicts: true }),
+        }),
+      ),
+    );
+    const merged = [...prompt.results];
+    const payloads = [...prompt.payloads];
+    prompt.indexes.forEach((slotIndex, k) => {
+      merged[slotIndex] = retried[k];
+      if (move) {
+        payloads[slotIndex] = {
+          ...payloads[slotIndex],
+          startDateTime: move.startDateTime,
+          endDateTime: move.endDateTime,
+        };
+      }
+    });
+    continueAfterResults(payloads, merged, prompt.tz);
   };
 
   const finishSave = (results) => {
@@ -3556,6 +3627,16 @@ export default function AppointmentComposerPanel({
               </button>
             </div>
           </div>
+        )}
+
+        {/* Teacher already booked — pick another time or book over it on purpose */}
+        {conflictPrompt && (
+          <ConflictPrompt
+            prompt={conflictPrompt}
+            onMove={(slot) => retryConflicts({ move: slot })}
+            onBookAnyway={() => retryConflicts()}
+            onDismiss={() => setConflictPrompt(null)}
+          />
         )}
 
         {/* Footer */}

@@ -1,3 +1,6 @@
+'use client'
+
+import { useState } from 'react'
 import { CalendarClock, Hash, Mail, Plus, Search, SlidersHorizontal, Users } from 'lucide-react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { cn, getInitials, getContactDisplayName } from '@/lib/utils'
@@ -9,9 +12,23 @@ const GROUP_SUBTITLE = {
   Customers: 'Customers',
   Leads: 'Leads',
   Teachers: 'Teachers',
+  Other: 'Other',
 }
 
 const STATUS_TABS = ['All', 'Unread', 'Scheduled']
+
+const OTHER_ORIGIN_GROUPS = [
+  { key: 'inbound', label: 'Inbound' },
+  { key: 'outbound', label: 'Outbound' },
+  { key: 'pending', label: 'Waiting' },
+]
+
+function resolveOtherOrigin(contact) {
+  const raw = String(contact?.origin || '').toLowerCase()
+  if (raw === 'inbound' || raw === 'outbound' || raw === 'pending') return raw
+  if (contact?.reason) return 'inbound'
+  return 'outbound'
+}
 
 /** Compact list time: today → 5:04 PM, this week → Tue, older → Oct 8. */
 function formatListTime(value) {
@@ -99,10 +116,23 @@ export default function ContactList({
   onOpenFilters,
   onClearFilters,
 }) {
+  const [otherOrigin, setOtherOrigin] = useState('inbound')
   const filtered = canFilter && activeFilterCount > 0
   const showingScheduled = statusTab === 'Scheduled'
   const showType = contactFilter === 'Everyone'
+  const isOther = contactFilter === 'Other'
   const query = searchQuery.trim()
+  const originCounts = isOther
+    ? OTHER_ORIGIN_GROUPS.reduce((counts, { key }) => {
+        counts[key] = conversations.filter((c) => resolveOtherOrigin(c.contact) === key).length
+        return counts
+      }, {})
+    : {}
+  const listedConversations =
+    isOther && !showingScheduled
+      ? conversations.filter((c) => resolveOtherOrigin(c.contact) === otherOrigin)
+      : conversations
+  const activeOrigin = OTHER_ORIGIN_GROUPS.find((g) => g.key === otherOrigin)
 
   const tabCount = { Unread: unreadCount, Scheduled: scheduledItems.length }
 
@@ -227,6 +257,44 @@ export default function ContactList({
         })}
       </div>
 
+      {isOther && !showingScheduled && (
+        <div role="tablist" aria-label="Other conversations" className="flex items-center gap-5 border-b border-border px-4">
+          {OTHER_ORIGIN_GROUPS.map(({ key, label }) => {
+            const active = otherOrigin === key
+            const count = originCounts[key] || 0
+            return (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setOtherOrigin(key)}
+                className={cn(
+                  '-mb-px inline-flex items-center gap-1.5 border-b-2 py-2.5 text-sm transition-colors',
+                  active
+                    ? 'border-[color:var(--studio-primary)] font-medium text-[color:var(--studio-primary)]'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {label}
+                {count > 0 && (
+                  <span
+                    className={cn(
+                      'min-w-[1.25rem] rounded-full px-1.5 text-[11px] font-medium leading-5 tabular-nums',
+                      active
+                        ? 'bg-[color:var(--studio-primary-light)] text-[color:var(--studio-primary)]'
+                        : 'bg-muted text-muted-foreground',
+                    )}
+                  >
+                    {count}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto scrollbar-hide">
         {showingScheduled ? (
           scheduledLoading && scheduledItems.length === 0 ? (
@@ -279,7 +347,7 @@ export default function ContactList({
               })}
             </ul>
           )
-        ) : conversations.length === 0 ? (
+        ) : listedConversations.length === 0 ? (
           filtered && filterApplying ? (
             <EmptyState title="Applying filters…" body="Finding conversations that match." />
           ) : filtered ? (
@@ -289,6 +357,11 @@ export default function ContactList({
             />
           ) : query ? (
             <EmptyState title="No matches" body={`No conversations match “${query}”.`} />
+          ) : isOther && !showingScheduled && conversations.length > 0 ? (
+            <EmptyState
+              title={`No ${activeOrigin?.label?.toLowerCase() || 'other'} chats`}
+              body="Switch tabs to see the other Others conversations."
+            />
           ) : statusTab === 'Unread' ? (
             <EmptyState title="You're all caught up" body="New replies show up here until you open them." />
           ) : (
@@ -296,7 +369,7 @@ export default function ContactList({
           )
         ) : (
           <ul>
-            {conversations.map((conv) => {
+            {listedConversations.map((conv) => {
               const active = selectedConversation === conv.id
               const unread = isUnread(conv)
               return (

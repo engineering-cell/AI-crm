@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import LocationSelector from '@/components/shared/LocationSelector'
 import api from '@/lib/api'
 import { toast } from '@/components/ui/toast'
+import ConflictPrompt from '../../components/ConflictPrompt'
 
 // Mon → Sun, as 0 (Sun) – 6 (Sat) weekday numbers.
 export const WEEKDAYS = [
@@ -99,6 +100,8 @@ export default function GroupClassDrawer({ open, onClose, lesson = null, schedul
   const [services, setServices] = useState([])
   const [teachers, setTeachers] = useState([])
   const [saving, setSaving] = useState(false)
+  // Set when the backend says the instructor is already booked for some sessions.
+  const [conflictPrompt, setConflictPrompt] = useState(null)
   const target = lesson || createdLesson
 
   useEffect(() => {
@@ -106,6 +109,7 @@ export default function GroupClassDrawer({ open, onClose, lesson = null, schedul
     setForm(classForm(lesson))
     setSched(scheduleForm(schedule, lesson, effectiveFrom))
     setCreatedLesson(null)
+    setConflictPrompt(null)
   }, [open, lesson, schedule, effectiveFrom])
 
   useEffect(() => {
@@ -137,8 +141,8 @@ export default function GroupClassDrawer({ open, onClose, lesson = null, schedul
     }
   }
 
-  async function handleSave(e) {
-    e.preventDefault()
+  async function handleSave(e, { allowConflicts = false } = {}) {
+    e?.preventDefault()
     if (!form.name.trim()) return toast.error('Class name is required')
     if (!form.locationID.length) return toast.error('Pick at least one location for this class')
     if (sched.enabled) {
@@ -149,6 +153,20 @@ export default function GroupClassDrawer({ open, onClose, lesson = null, schedul
 
     setSaving(true)
     try {
+      // New schedule: ask first whether the instructor is already booked, so a blocked
+      // schedule doesn't leave behind a saved class with no schedule.
+      if (!schedule && sched.enabled && sched.teacherID && !allowConflicts) {
+        const check = await api.post('/api/class-schedule/check-conflicts', {
+          ...scheduleFields(),
+          locationID: sched.locationID || form.locationID[0],
+          durationMinutes: scheduleFields().durationMinutes ?? (Number(form.duration) || 60),
+        })
+        if (check.success && check.data?.hasConflicts) {
+          setConflictPrompt({ ...check.data, tz: check.data.timezone })
+          return
+        }
+      }
+
       const classPayload = {
         name: form.name.trim(),
         description: form.description.trim(),
@@ -172,11 +190,20 @@ export default function GroupClassDrawer({ open, onClose, lesson = null, schedul
         })
         if (!res.success) return showScheduleError(res)
       } else if (sched.enabled) {
-        const res = await api.post('/api/class-schedule', {
+        const schedulePayload = {
           ...scheduleFields(),
           lessonID: lessonRes.data._id,
           locationID: sched.locationID || form.locationID[0],
-        })
+          ...(allowConflicts ? { allowConflicts: true } : {}),
+        }
+        const res = await api.post('/api/class-schedule', schedulePayload)
+        // Safety net: a booking made after the pre-check above can still clash. The class
+        // is saved at this point, so a retry re-checks without creating it twice.
+        if (!res.success && res.errorData?.needsConflictConfirm) {
+          onSaved?.()
+          setConflictPrompt({ ...res.errorData, tz: res.errorData.timezone })
+          return
+        }
         if (!res.success) {
           onSaved?.()
           return showScheduleError(res)
@@ -189,6 +216,12 @@ export default function GroupClassDrawer({ open, onClose, lesson = null, schedul
     } finally {
       setSaving(false)
     }
+  }
+
+  // Staff chose to create the schedule even though the instructor is double-booked.
+  function bookAnyway() {
+    setConflictPrompt(null)
+    return handleSave(null, { allowConflicts: true })
   }
 
   async function handleEndSchedule() {
@@ -425,6 +458,15 @@ export default function GroupClassDrawer({ open, onClose, lesson = null, schedul
               </div>
             )}
           </div>
+
+          {conflictPrompt && (
+            <ConflictPrompt
+              prompt={conflictPrompt}
+              busy={saving}
+              onBookAnyway={bookAnyway}
+              onDismiss={() => setConflictPrompt(null)}
+            />
+          )}
 
           <div className="sticky bottom-0 flex items-center justify-between gap-2 border-t border-border bg-card px-6 py-4">
             {schedule ? (

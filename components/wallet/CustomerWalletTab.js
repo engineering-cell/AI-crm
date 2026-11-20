@@ -22,6 +22,7 @@ import { toast } from "@/components/ui/toast";
 import LoadingSpinner from "@/components/shared/LoadingSpinner";
 import api from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
+import { dateInputToISO, todayDateInput } from "@/lib/studioLocalDate";
 import { useCardProcessor } from "@/app/settings/payments/useCardProcessor";
 import { openCheckoutTab, navigateCheckoutTab, closeCheckoutTab, CHECKOUT_TOAST } from "@/lib/clover";
 import { PAYMENT_METHODS_WITH_SAVED_CARD } from "@/lib/paymentMethods";
@@ -69,6 +70,7 @@ function AdjustWalletDialog({ open, mode, customerID, locationID, onClose, onSuc
   const [deviceID, setDeviceID] = useState("");
   const [savedCardID, setSavedCardID] = useState("");
   const [checkNumber, setCheckNumber] = useState("");
+  const [paymentDate, setPaymentDate] = useState(todayDateInput);
   const [saving, setSaving] = useState(false);
 
   const isAddMoney = mode === "add";
@@ -84,8 +86,12 @@ function AdjustWalletDialog({ open, mode, customerID, locationID, onClose, onSuc
   const terminalNotSelected = payWithTerminal && !deviceID;
   const payWithSavedCard = isAddMoney && method === "saved_card";
   const savedCardNotSelected = payWithSavedCard && !savedCardID;
+  // Card / ACH / reader charges happen live, so only money recorded after the fact
+  // (cash, cheque, other) can be back-dated.
+  const canBackdate = isAddMoney && !["card", "ach", "terminal", "saved_card"].includes(method);
 
   function reset() {
+    setPaymentDate(todayDateInput());
     setAmount("");
     setNote("");
     setDescription("");
@@ -120,6 +126,7 @@ function AdjustWalletDialog({ open, mode, customerID, locationID, onClose, onSuc
         ...(payWithTerminal ? { deviceID, ...terminalTipPayload() } : {}),
         ...(payWithSavedCard ? { cardToken: savedCardID } : {}),
         ...(method === "cheque" ? { checkNumber } : {}),
+        ...(canBackdate && paymentDate ? { paymentDate: dateInputToISO(paymentDate) } : {}),
       });
       if (res.success && res.data?.checkoutUrl) {
         navigateCheckoutTab(checkoutTab, res.data.checkoutUrl);
@@ -224,6 +231,20 @@ function AdjustWalletDialog({ open, mode, customerID, locationID, onClose, onSuc
                 onCardChange={setSavedCardID}
               />
               <CheckNumberField method={method} checkNumber={checkNumber} onChange={setCheckNumber} />
+              {canBackdate && (
+                <FormField label="Date">
+                  <input
+                    type="date"
+                    value={paymentDate}
+                    max={todayDateInput()}
+                    onChange={(e) => setPaymentDate(e.target.value)}
+                    className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[13px] outline-none focus:border-primary"
+                  />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Set an earlier date to back-date this credit — it is recorded on that day, not today.
+                  </p>
+                </FormField>
+              )}
               <FormField label="Description (optional)">
                 <input
                   type="text"

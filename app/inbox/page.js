@@ -434,8 +434,11 @@ function InboxPageContent() {
             locationID: conv.locationID || [],
             convertedCustomerID: conv.convertedCustomerID || null,
             leadSourceID: conv.leadSourceID || null,
+            // Set on a household member's own chat: whose account they belong to.
+            memberOf: conv.memberOf || null,
             reason: conv.reason || '',
             evidence: conv.evidence || '',
+            origin: conv.origin || '',
           },
           lastMessage: conv.lastMessage,
           timestamp: conv.lastMessageAt,
@@ -546,6 +549,12 @@ function InboxPageContent() {
   useEffect(() => {
     setContactFilter(INBOX_FILTER_MAP[urlFilter] ?? 'Customers')
   }, [urlFilter])
+
+  // Leads → Others "open in inbox" passes ?q=phone
+  const urlQuery = searchParams?.get('q') || ''
+  useEffect(() => {
+    if (urlQuery) setSearchQuery(urlQuery)
+  }, [urlQuery])
 
   // Location is enforced by the API via x-location-id (branch switcher reloads the page).
   const filteredConversations = useMemo(() => conversations, [conversations])
@@ -1115,6 +1124,8 @@ function InboxPageContent() {
     contentHtml = null,
     // New message pane: send to a conversation that may not be in state yet.
     target = null,
+    // A household member picked in the conversation (instead of the account holder).
+    recipient = null,
   }) => {
     const convId = target?.convId || selectedConversationRef.current || selectedConversation
     if (!convId || !(String(contentHtml || content || '').trim())) return false
@@ -1132,8 +1143,12 @@ function InboxPageContent() {
     const fallbackContact = convFromUI?.contact || { id: convId, name: 'New conversation', type: 'Lead' }
     const effectiveChannel = channel || convFromUI?.channel || 'SMS'
 
+    // Email to a member: same account, their address.
+    const emailContact = recipient?.email ? { ...fallbackContact, email: recipient.email } : fallbackContact
+    const emailLeadData = recipient?.email && leadData ? { ...leadData, email: recipient.email } : leadData
+
     if (effectiveChannel === 'Email') {
-      const leadRecipient = buildLeadRecipient(fallbackContact, leadData)
+      const leadRecipient = buildLeadRecipient(emailContact, emailLeadData)
       const validationError = validateEmailSendInput({
         lead: leadRecipient,
         subject,
@@ -1165,7 +1180,7 @@ function InboxPageContent() {
     }
 
     const messageId = `${Date.now()}`
-    const leadRecipient = buildLeadRecipient(fallbackContact, leadData)
+    const leadRecipient = buildLeadRecipient(emailContact, emailLeadData)
     const personalizedContent =
       effectiveChannel === 'SMS'
         ? applyEmailTemplate(String(content || '').trim(), leadRecipient)
@@ -1307,7 +1322,7 @@ function InboxPageContent() {
         }
         return true
       } else if (effectiveChannel === 'SMS') {
-        const phoneNumber = leadData?.phoneNumber || fallbackContact.phoneNumber
+        const phoneNumber = recipient?.phoneNumber || leadData?.phoneNumber || fallbackContact.phoneNumber
         if (!phoneNumber) {
           revertOptimisticMessage(convId, messageId)
           toast.error({
@@ -1475,6 +1490,9 @@ function InboxPageContent() {
     } else if (existed) {
       fetchConversationEmailHistory(convId)
     }
+    // A typed number may belong to a household member: the server then files the text on their
+    // account and gives them a chat of their own, so replace the temporary "Other" row with it.
+    if (recipient.kind === 'number') fetchInboxData()
     return true
   }
 
@@ -1856,7 +1874,8 @@ function InboxPageContent() {
     endOutboundCallRef.current = handleEndOutboundCall
   }, [handleEndOutboundCall])
 
-  const handlePlaceCall = useCallback(async () => {
+  // `recipient`: a household member to call instead of the account holder.
+  const handlePlaceCall = useCallback(async (recipient = null) => {
     const convId = selectedConversationRef.current || selectedConversation
     if (!convId) return
     if (activeOutboundCall) {
@@ -1874,7 +1893,7 @@ function InboxPageContent() {
       ...(conv?.contact || {}),
       ...(selectedLeadData || {}),
     }
-    const phoneNumber = contact.phoneNumber || conv?.contact?.phoneNumber
+    const phoneNumber = recipient?.phoneNumber || contact.phoneNumber || conv?.contact?.phoneNumber
     if (!phoneNumber) {
       toast.error({
         title: 'Missing phone',
@@ -1886,7 +1905,7 @@ function InboxPageContent() {
     setCallPlacing(true)
     endingOutboundRef.current = false
     const attempt = ++outboundAttemptRef.current
-    const displayName = getContactDisplayName(contact)
+    const displayName = recipient?.label || getContactDisplayName(contact)
     setActiveOutboundCall({
       id: `pending-${Date.now()}`,
       name: displayName,
@@ -1910,7 +1929,7 @@ function InboxPageContent() {
       const leadPayload = {
         _id: contact._id || contact.id || (convId.startsWith('lead-') ? convId.replace('lead-', '') : undefined),
         phoneNumber,
-        name: getContactDisplayName(contact),
+        name: recipient?.name || getContactDisplayName(contact),
         locationID: locationIDs,
       }
       const result = await api.post('/api/human-call/call-now', { lead: leadPayload })
@@ -2157,6 +2176,9 @@ function InboxPageContent() {
         mediaUrl: Array.isArray(m.mediaUrl) && m.mediaUrl.length ? m.mediaUrl : undefined,
         timestamp: m.createdAt,
         channel: 'SMS',
+        // So a message to / from a household member's number can be labelled as theirs.
+        from: m.from,
+        to: m.to,
       })
       const mapped = [...msgs, ...linkedMsgs].map(mapSms)
       setThreadMessages((prev) => {

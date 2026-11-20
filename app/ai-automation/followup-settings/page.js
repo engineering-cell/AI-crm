@@ -17,7 +17,6 @@ import WorkflowStageMultiSelect from '@/components/workflow/WorkflowStageMultiSe
 import { formatLeadStageLabel } from '@/lib/lead-stages'
 
 const MIN_FOLLOWUPS = 1
-const MAX_FOLLOWUPS = 10
 /** Empty scope = Navbar is All branches and user has not picked a studio yet. */
 const NO_BRANCH = ''
 
@@ -48,10 +47,6 @@ function AutoGrowTextarea({ value, minRows = 4, className, ...props }) {
   )
 }
 
-// The API stores the wait as hours + minutes; days are entered here and sent as hours.
-const MAX_INTERVAL_HOURS = 72
-const MAX_INTERVAL_DAYS = Math.floor(MAX_INTERVAL_HOURS / 24)
-
 /** API hours → { intervalDays, intervalHours } for the form (e.g. 26 → 1 day 2 hours). */
 function splitIntervalHours(totalHours) {
   const total = Math.max(0, Math.floor(Number(totalHours) || 0))
@@ -63,8 +58,8 @@ function intervalForApi(item, { allowZero = false } = {}) {
   const days = Number(item?.intervalDays || 0)
   const hours = Number(item?.intervalHours || 0)
   const minutes = Number(item?.intervalMinutes || 0)
-  if (!Number.isInteger(days) || days < 0 || days > MAX_INTERVAL_DAYS) {
-    return { error: `days must be 0–${MAX_INTERVAL_DAYS}.` }
+  if (!Number.isInteger(days) || days < 0) {
+    return { error: 'days must be 0 or more.' }
   }
   if (!Number.isInteger(hours) || hours < 0 || hours > 23) {
     return { error: 'hours must be 0–23.' }
@@ -73,9 +68,6 @@ function intervalForApi(item, { allowZero = false } = {}) {
     return { error: 'minutes must be 0–59.' }
   }
   const totalHours = days * 24 + hours
-  if (totalHours > MAX_INTERVAL_HOURS) {
-    return { error: `wait can be at most ${MAX_INTERVAL_HOURS} hours (${MAX_INTERVAL_DAYS} days).` }
-  }
   if (!allowZero && totalHours === 0 && minutes === 0) {
     return { error: 'interval must be greater than zero.' }
   }
@@ -415,13 +407,6 @@ export default function FollowupSettingsPage() {
     setForm((prev) => {
       const stage = prev.stageFollowups[stageIndex]
       if (!stage) return prev
-      if (stage.followups.length >= MAX_FOLLOWUPS) {
-        toast.error({
-          title: 'Limit reached',
-          message: `You can add up to ${MAX_FOLLOWUPS} follow-ups per stage.`,
-        })
-        return prev
-      }
       return {
         ...prev,
         stageFollowups: prev.stageFollowups.map((item, i) =>
@@ -463,13 +448,6 @@ export default function FollowupSettingsPage() {
 
     if (!Array.isArray(config.followups) || config.followups.length < MIN_FOLLOWUPS) {
       toast.error({ title: 'Validation', message: `${label}: add at least one follow-up step.` })
-      return null
-    }
-    if (config.followups.length > MAX_FOLLOWUPS) {
-      toast.error({
-        title: 'Validation',
-        message: `${label}: at most ${MAX_FOLLOWUPS} follow-up steps.`,
-      })
       return null
     }
 
@@ -931,7 +909,6 @@ export default function FollowupSettingsPage() {
                                       id={`first-message-days-${cardKey}`}
                                       type="number"
                                       min={0}
-                                      max={MAX_INTERVAL_DAYS}
                                       value={config.firstMessage?.intervalDays ?? '0'}
                                       onChange={(e) =>
                                         updateStageConfig(stageIndex, {
@@ -944,7 +921,7 @@ export default function FollowupSettingsPage() {
                                       }
                                       disabled={busy || scheduleDisabled}
                                     />
-                                    <p className="text-xs text-muted-foreground">0–{MAX_INTERVAL_DAYS} days</p>
+                                    <p className="text-xs text-muted-foreground">0 or more days</p>
                                   </div>
                                   <div className="space-y-2">
                                     <label
@@ -1062,29 +1039,13 @@ export default function FollowupSettingsPage() {
                               ) : null}
                             </div>
 
-                            <div className="flex items-center justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-medium">Follow-up steps</div>
-                                <p className="mt-0.5 text-xs text-muted-foreground">
-                                  After the first message (if enabled), or when a chain restarts,
-                                  these steps run in order. Each waits its interval after the
-                                  previous message.
-                                </p>
-                              </div>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => addFollowupStep(stageIndex)}
-                                disabled={
-                                  busy ||
-                                  scheduleDisabled ||
-                                  config.followups.length >= MAX_FOLLOWUPS
-                                }
-                              >
-                                <Plus className="h-4 w-4" />
-                                Add step
-                              </Button>
+                            <div>
+                              <div className="text-sm font-medium">Follow-up steps</div>
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                After the first message (if enabled), or when a chain restarts,
+                                these steps run in order. Each waits its interval after the
+                                previous message.
+                              </p>
                             </div>
 
                             {config.followups.map((step, stepIndex) => (
@@ -1125,7 +1086,6 @@ export default function FollowupSettingsPage() {
                                       id={`followup-days-${cardKey}-${stepIndex}`}
                                       type="number"
                                       min={0}
-                                      max={MAX_INTERVAL_DAYS}
                                       value={step.intervalDays ?? '0'}
                                       onChange={(e) =>
                                         updateStageFollowup(stageIndex, stepIndex, {
@@ -1134,7 +1094,7 @@ export default function FollowupSettingsPage() {
                                       }
                                       disabled={busy || scheduleDisabled}
                                     />
-                                    <p className="text-xs text-muted-foreground">0–{MAX_INTERVAL_DAYS} days</p>
+                                    <p className="text-xs text-muted-foreground">0 or more days</p>
                                   </div>
                                   <div className="space-y-2">
                                     <label
@@ -1228,6 +1188,19 @@ export default function FollowupSettingsPage() {
                                 </div>
                               </div>
                             ))}
+
+                            <div className="flex justify-start pt-1">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => addFollowupStep(stageIndex)}
+                                disabled={busy || scheduleDisabled}
+                              >
+                                <Plus className="h-4 w-4" />
+                                Add step
+                              </Button>
+                            </div>
 
                             <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
                               <Button

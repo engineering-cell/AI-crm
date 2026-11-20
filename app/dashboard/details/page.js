@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { ArrowLeft, ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import MainLayout from '@/components/layout/MainLayout'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { ReportFilterPanel } from '@/components/reports/ReportFilterPanel'
@@ -19,6 +20,8 @@ import { countActiveReportFilters, buildReportQueryParams } from '@/lib/reports/
 import { getActiveReportFilterChips, removeReportFilterChip } from '@/lib/reports/reportActiveFilterChips'
 import { formatReportCellValue } from '@/lib/reports/formatReportCell'
 import api from '@/lib/api'
+import DrillView from '@/components/owner-dashboard/full/DrillView'
+import { rangeQuery } from '@/lib/hooks/useAnalyticsOverview'
 
 const PAGE_SIZE = 25
 
@@ -60,6 +63,34 @@ function formatCell(row, column, timeZone) {
   return formatReportCellValue(row[column.key], column, timeZone)
 }
 
+function csvEscape(v) {
+  const t = v === null || v === undefined ? '' : String(v)
+  return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t
+}
+
+/** Spec: every drill-down table exports to CSV. Pages through the whole result set, not just the visible page. */
+async function exportRowsToCsv({ title, columns, timeZone, fetchAll }) {
+  const rows = await fetchAll()
+  const lines = [columns.map((c) => csvEscape(c.label)).join(',')]
+  for (const row of rows) {
+    lines.push(
+      columns
+        .map((c) => {
+          const cell = formatCell(row, c, timeZone)
+          return csvEscape(typeof cell === 'string' || typeof cell === 'number' ? cell : row[c.key])
+        })
+        .join(',')
+    )
+  }
+  const blob = new Blob([`\uFEFF${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 function isCustomRange(value) {
   return Boolean(value && typeof value === 'object' && value.from && value.to)
 }
@@ -85,6 +116,7 @@ function resolveDetailsRange(filters, requestRange) {
     return { from: filters.dateFrom, to: filters.dateTo }
   }
   if (typeof requestRange === 'number' && requestRange >= 0) return requestRange
+  if (requestRange === 'mtd' || requestRange === 'qtd' || requestRange === 'ytd') return requestRange
   if (isCustomRange(requestRange)) return requestRange
   return 30
 }
@@ -125,6 +157,7 @@ function filtersFromRequest(request) {
  */
 export default function DashboardDetailsPage() {
   const request = useDashboardDetailsRequest()
+  const router = useRouter()
   const [page, setPage] = useState(1)
   const [filters, setFilters] = useState(() => filtersFromRequest(request))
   const [filterPanelOpen, setFilterPanelOpen] = useState(false)
@@ -148,6 +181,15 @@ export default function DashboardDetailsPage() {
     setPage(1)
     setFilters(filtersFromRequest(request))
   }, [request])
+
+  // Spec: Escape closes the drill-down and returns to the dashboard.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape' && !filterPanelOpen) router.push(request?.backHref || '/dashboard')
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [router, request?.backHref, filterPanelOpen])
 
   const isDashboard = request?.source === 'dashboard'
   const isOwner = request?.source === 'owner'
@@ -293,6 +335,39 @@ export default function DashboardDetailsPage() {
     }
   }, [isLeads, page, range, filters.studioId, filters.leadSource, reportTimezone])
 
+  const [exporting, setExporting] = useState(false)
+  async function handleExport() {
+    setExporting(true)
+    try {
+      const endpoint = isOwner ? '/api/dashboard/owner-overview/details' : '/api/dashboard/overview/details'
+      await exportRowsToCsv({
+        title: request.title,
+        columns: request.columns,
+        timeZone: reportTimezone,
+        fetchAll: async () => {
+          if (isLeads) return leadsData?.rows || []
+          const all = []
+          for (let p = 1; p <= 40; p += 1) {
+            const qs = new URLSearchParams(rangeQuery(range))
+            qs.set('metric', request.metric)
+            qs.set('page', String(p))
+            qs.set('limit', '500')
+            for (const [k, v] of Object.entries(detailParams || {})) {
+              if (v !== undefined && v !== null && v !== '') qs.set(k, v)
+            }
+            const res = await api.get(`${endpoint}?${qs.toString()}`)
+            const batch = res?.data?.rows || []
+            all.push(...batch)
+            if (all.length >= (res?.data?.total || 0) || batch.length === 0) break
+          }
+          return all
+        },
+      })
+    } finally {
+      setExporting(false)
+    }
+  }
+
   function handleFiltersChange(nextFilters) {
     setPage(1)
     setFilters(nextFilters)
@@ -322,6 +397,7 @@ export default function DashboardDetailsPage() {
       ? { rows: ownerResult.data?.rows || [], total: ownerResult.data?.total || 0, isLoading: ownerResult.isLoading }
       : { rows: leadsData?.rows || [], total: leadsData?.total || 0, isLoading: leadsLoading }
 
+  const summary = isOwner ? ownerResult.data?.summary || null : null
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1)
   const activeFilterCount = countActiveReportFilters(filters)
   const activeFilterChips = getActiveReportFilterChips(filters, {
@@ -335,6 +411,15 @@ export default function DashboardDetailsPage() {
 
   return (
     <MainLayout title={request.title} subtitle="Full details">
+      {/* Overlay: Escape or a click outside the panel closes it (spec). */}
+      <div
+        className="fixed inset-0 z-40 overflow-y-auto bg-black/40 p-3 sm:p-8"
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) router.push(request.backHref || '/dashboard')
+        }}
+      >
+        <div className="mx-auto w-full max-w-6xl rounded-2xl bg-background p-4 shadow-2xl sm:p-6" role="dialog" aria-label={request.title}>
+
       <Link
         href={request.backHref || '/dashboard'}
         className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -342,6 +427,10 @@ export default function DashboardDetailsPage() {
         <ArrowLeft className="h-4 w-4" />
         Back to Dashboard
       </Link>
+      {request.drill ? (
+        <DrillView kind={request.drill} range={range} />
+      ) : (
+      <>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <ReportSearchInput
@@ -389,7 +478,30 @@ export default function DashboardDetailsPage() {
         }
       />
 
-      <div className="mt-4 overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+      {summary?.length > 0 && (
+        <dl className="mt-3 grid gap-x-6 gap-y-1 rounded-xl border border-border bg-card px-4 py-3 text-[12.5px] sm:grid-cols-[auto_1fr]">
+          {summary.map((it) => (
+            <div key={it.label} className="contents">
+              <dt className="font-semibold text-muted-foreground">{it.label}</dt>
+              <dd className="text-foreground">{typeof it.value === 'number' ? it.value.toLocaleString() : it.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
+      <div className="mt-3 flex justify-end">
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={exporting || rows.length === 0}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12.5px] font-semibold text-foreground transition-colors hover:bg-muted/60 disabled:opacity-50"
+        >
+          <Download className="h-3.5 w-3.5" />
+          {exporting ? 'Exporting…' : 'Export CSV'}
+        </button>
+      </div>
+
+      <div className="mt-2 overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
         {isLoading && rows.length === 0 ? (
           <div className="h-40 animate-pulse bg-muted/30" />
         ) : rows.length === 0 ? (
@@ -410,7 +522,12 @@ export default function DashboardDetailsPage() {
             </TableHeader>
             <TableBody>
               {rows.map((row, i) => (
-                <TableRow key={row._id || row.id || i} className="even:bg-muted/20">
+                <TableRow
+                  key={row._id || row.id || i}
+                  className={`even:bg-muted/20 ${row.customerID ? 'cursor-pointer hover:bg-muted/50' : ''}`}
+                  onClick={row.customerID ? () => window.open(`/settings/users-roles/customers/${row.customerID}`, '_blank') : undefined}
+                  title={row.customerID ? 'Open this student’s account' : undefined}
+                >
                   {request.columns.map((col) => (
                     <TableCell key={col.key} className="whitespace-nowrap text-sm">
                       {formatCell(row, col, reportTimezone)}
@@ -448,6 +565,10 @@ export default function DashboardDetailsPage() {
           </div>
         </div>
       )}
+      </>
+      )}
+        </div>
+      </div>
     </MainLayout>
   )
 }

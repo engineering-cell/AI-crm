@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { Mail, MailWarning, ArrowLeft, RefreshCw, Hash } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,7 @@ import { htmlToPlainText, emailBodyToPlainText } from '@/lib/emailSend'
 import { cn } from '@/lib/utils'
 import { toStudioLocalDate, formatStudioDate } from '@/lib/studioLocalDate'
 import { getStudioTimezone } from '@/lib/studioTimezone'
+import { annotateMemberMessages, pickRecipient, recipientOptions } from '@/lib/household-recipients'
 
 // Messages are grouped under the studio's calendar day, not the viewer's.
 const studioDay = (v) => toStudioLocalDate(new Date(v), getStudioTimezone()).toDateString()
@@ -48,7 +49,7 @@ function defaultChannelTab(conversation) {
 
 export default function ConversationView({
   conversation,
-  messages,
+  messages: rawMessages,
   onToggleDetails,
   onSendMessage,
   onBackClick,
@@ -74,6 +75,8 @@ export default function ConversationView({
 }) {
   const [activeTab, setActiveTab] = useState(() => defaultChannelTab(conversation))
   const [nameDraft, setNameDraft] = useState(null) // null = not editing
+  // Who a text / call / email goes to: the account holder ('self') or a household member.
+  const [recipientKey, setRecipientKey] = useState('self')
   const [savingName, setSavingName] = useState(false)
   const isOther = String(conversation?.contact?.type || '').toLowerCase() === 'other'
   // Unknown numbers and leads can be renamed here (e.g. a caller who turns out to be a student).
@@ -88,9 +91,27 @@ export default function ConversationView({
   const contactPhone = leadPreview?.phoneNumber || conversation?.contact?.phoneNumber || ''
   const contactName = getContactDisplayName(leadPreview || conversation?.contact || {})
 
+  // Household members (partner, family) saved on the account: staff can text / call / email them
+  // from here, and their messages are labelled as theirs rather than the account holder's.
+  const members = leadPreview?.members || conversation?.contact?.members || []
+  const holder = { name: contactName, phoneNumber: contactPhone, email: contactEmail, members }
+  const channelForRecipients = activeTab === 'E-mail' ? 'Email' : 'SMS'
+  const recipients = recipientOptions(holder, channelForRecipients)
+  const selectedRecipient = pickRecipient(recipients, recipientKey)
+  const sendsToMember = Boolean(selectedRecipient?.isMember)
+  // Same payload as before, plus who it is for when that is a household member.
+  const sendToRecipient = (payload) =>
+    onSendMessage?.(sendsToMember ? { ...payload, recipient: selectedRecipient } : payload)
+  const messages = useMemo(
+    () => annotateMemberMessages(rawMessages, { phoneNumber: contactPhone, members }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rawMessages, contactPhone, members],
+  )
+
   useEffect(() => {
     setActiveTab(defaultChannelTab(conversation))
     setNameDraft(null)
+    setRecipientKey('self')
     prevScrollHeightRef.current = 0
     isLoadingMoreRef.current = false
     const el = scrollRef.current
@@ -215,8 +236,16 @@ export default function ConversationView({
                   {isOther
                     ? conversation.contact?.reason
                       ? `Other · ${conversation.contact.reason}`
-                      : 'Not in the CRM'
-                    : conversation.contact?.type}
+                      : String(conversation.contact?.origin || '').toLowerCase() === 'pending'
+                        ? 'Waiting for intent'
+                        : String(conversation.contact?.origin || '').toLowerCase() === 'outbound'
+                          ? 'Outbound · Not in the CRM'
+                          : 'Not in the CRM'
+                    : conversation.contact?.memberOf
+                      ? `Member of ${conversation.contact.memberOf.name}${
+                          conversation.contact.memberOf.relationship ? ` · ${conversation.contact.memberOf.relationship}` : ''
+                        }`
+                      : conversation.contact?.type}
                 </span>
                 {contactPhone && (!isOther || conversation.contact?.name) && (
                   <>
@@ -531,6 +560,11 @@ export default function ConversationView({
                           </div>
                         ) : (
                           <>
+                            {message.counterpart && (
+                              <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+                                {isInbound ? message.counterpart : `To ${message.counterpart}`}
+                              </p>
+                            )}
                             {message.mediaUrl?.map((url) => (
                               <a key={url} href={url} target="_blank" rel="noreferrer noopener" className="mb-1.5 block">
                                 <img src={url} alt="Photo in message" className="max-h-60 max-w-full rounded-2xl border border-border object-cover" />
@@ -570,23 +604,43 @@ export default function ConversationView({
 
       {/* Composer */}
       <div className="flex-shrink-0">
+        {recipients.length > 1 && (
+          <div className="flex items-center gap-2 border-t border-border bg-card px-4 py-2">
+            <label htmlFor="conversation-recipient" className="text-xs font-medium text-muted-foreground">
+              {activeTab === 'Call' ? 'Call' : 'To'}
+            </label>
+            <select
+              id="conversation-recipient"
+              value={selectedRecipient?.key || 'self'}
+              onChange={(e) => setRecipientKey(e.target.value)}
+              className="h-8 min-w-0 max-w-full flex-1 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+            >
+              {recipients.map((r) => (
+                <option key={r.key} value={r.key}>
+                  {r.label}
+                  {r.isMember ? '' : ' (account holder)'} · {activeTab === 'E-mail' ? r.email : r.phoneNumber}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         {activeTab === 'Call' ? (
           <CallMessageInput
-            phoneNumber={contactPhone}
-            contactName={contactName}
-            onPlaceCall={onPlaceCall}
+            phoneNumber={selectedRecipient?.phoneNumber || contactPhone}
+            contactName={sendsToMember ? selectedRecipient.label : contactName}
+            onPlaceCall={() => onPlaceCall?.(sendsToMember ? selectedRecipient : null)}
             calling={callPlacing}
-            disabled={!contactPhone}
+            disabled={!(selectedRecipient?.phoneNumber || contactPhone)}
             disabledReason={
-              !contactPhone
+              !(selectedRecipient?.phoneNumber || contactPhone)
                 ? 'Add a phone number on this contact to place a call.'
                 : ''
             }
           />
         ) : activeTab === 'E-mail' ? (
-          contactEmail ? (
+          selectedRecipient?.email || contactEmail ? (
             <EmailMessageInput
-              onSendMessage={onSendMessage}
+              onSendMessage={sendToRecipient}
               sending={emailSending}
             />
           ) : (
@@ -601,7 +655,7 @@ export default function ConversationView({
             </div>
           )
         ) : (
-          <MessageInput onSendMessage={onSendMessage} channel="SMS" sending={smsSending} />
+          <MessageInput onSendMessage={sendToRecipient} channel="SMS" sending={smsSending} />
         )}
       </div>
     </main>

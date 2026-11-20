@@ -98,6 +98,7 @@ export default function DonutChart({
           }}
         />
 
+        <div className="absolute inset-0 z-10">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <defs>
@@ -157,15 +158,17 @@ export default function DonutChart({
             </Pie>
 
             <Tooltip
+              wrapperStyle={{ zIndex: 50, outline: 'none' }}
               content={
                 <CustomTooltip valueFormatter={valueFormatter} nameKey={nameKey} />
               }
             />
           </PieChart>
         </ResponsiveContainer>
+        </div>
 
         {(centerLabel || centerValue != null) && (
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-4 text-center">
+          <div className="pointer-events-none absolute inset-0 z-0 flex flex-col items-center justify-center px-4 text-center">
             {centerLabel && (
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                 {centerLabel}

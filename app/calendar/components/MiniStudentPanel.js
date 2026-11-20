@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -175,6 +175,14 @@ export default function MiniStudentPanel({
   const [msgError, setMsgError] = useState(null);
   const [smsHistory, setSmsHistory] = useState([]);
   const [loadingSmsHistory, setLoadingSmsHistory] = useState(false);
+  const [smsLoadError, setSmsLoadError] = useState(null);
+  const smsThreadRef = useRef(null);
+  const [emailHistory, setEmailHistory] = useState([]);
+  const [loadingEmailHistory, setLoadingEmailHistory] = useState(false);
+  const [emailLoadError, setEmailLoadError] = useState(null);
+  const [emailLoadForbidden, setEmailLoadForbidden] = useState(false);
+  const [expandedEmails, setExpandedEmails] = useState({});
+  const emailThreadRef = useRef(null);
   const [leadId, setLeadId] = useState(null);
 
   useEffect(() => {
@@ -837,40 +845,178 @@ export default function MiniStudentPanel({
     load();
   }, [activeTab, customerId]);
 
-  useEffect(() => {
-    if (activeTab !== "messages") return;
-    async function load() {
-      setLoadingSmsHistory(true);
+  const loadSmsHistory = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!customerId || !customer) return;
+      if (!silent) setLoadingSmsHistory(true);
+      setSmsLoadError(null);
       try {
-        // First, find the lead by email or phone number
-        const leadResult = await api.get(
-          `/api/lead/find-by-contact?email=${encodeURIComponent(customer?.email || "")}&phoneNumber=${encodeURIComponent(customer?.phoneNumber || "")}`,
-        );
-        if (leadResult.success && leadResult.data) {
-          setLeadId(leadResult.data._id);
-          // Then fetch SMS history using the lead ID
-          const smsResult = await api.get(
-            `/api/smsHistory?leadID=${leadResult.data._id}&limit=100`,
-          );
-          if (smsResult.success && Array.isArray(smsResult.data)) {
-            const sorted = [...smsResult.data].sort(
-              (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
-            );
-            setSmsHistory(sorted);
-          }
-        } else {
-          setSmsHistory([]);
+        // A student's texts can sit on their lead thread, their customer thread, or both.
+        let foundLeadId = null;
+        if (customer.email || customer.phoneNumber) {
+          const leadResult = await api
+            .get(
+              `/api/lead/find-by-contact?email=${encodeURIComponent(customer.email || "")}&phoneNumber=${encodeURIComponent(customer.phoneNumber || "")}`,
+            )
+            .catch(() => null);
+          foundLeadId = leadResult?.success && leadResult.data?._id ? leadResult.data._id : null;
         }
+        setLeadId(foundLeadId);
+        const ids = [...new Set([foundLeadId, customerId].filter(Boolean).map(String))];
+        const results = await Promise.all(
+          ids.map((id) =>
+            api.get(`/api/smsHistory/conversations/${id}?page=1&limit=200`).catch(() => null),
+          ),
+        );
+        const byId = new Map();
+        let anySuccess = false;
+        const forbidden = results.some((r) => r?.status === 403);
+        for (const r of results) {
+          if (!r?.success) continue;
+          anySuccess = true;
+          for (const m of r.data?.messages || []) byId.set(String(m._id), m);
+        }
+        if (!anySuccess && ids.length) {
+          setSmsLoadError(
+            forbidden
+              ? "You don't have permission to view message history."
+              : "Couldn't load messages. Please try again.",
+          );
+        }
+        if (anySuccess || !ids.length) setSmsHistory(
+          [...byId.values()].sort(
+            (x, y) => new Date(x.createdAt) - new Date(y.createdAt),
+          ),
+        );
       } catch (error) {
         console.error("Failed to load SMS history:", error);
-        setSmsHistory([]);
+        setSmsLoadError("Couldn't load messages. Please try again.");
       }
       setLoadingSmsHistory(false);
-    }
-    load();
-  }, [activeTab, customerId, customer]);
+    },
+    [customerId, customer],
+  );
+
+  useEffect(() => {
+    if (activeTab !== "messages") return;
+    loadSmsHistory();
+  }, [activeTab, loadSmsHistory]);
+
+  // Keep the thread scrolled to the newest message.
+  useEffect(() => {
+    if (activeTab !== "messages" || msgMode !== "sms") return;
+    const el = smsThreadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [smsHistory, activeTab, msgMode, loadingSmsHistory]);
+
+  const loadEmailHistory = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!customerId || !customer) return;
+      if (!silent) setLoadingEmailHistory(true);
+      setEmailLoadError(null);
+      setEmailLoadForbidden(false);
+      try {
+        // Emails can be logged against the lead, the customer, or both.
+        let foundLeadId = leadId;
+        if (!foundLeadId && (customer.email || customer.phoneNumber)) {
+          const leadResult = await api
+            .get(
+              `/api/lead/find-by-contact?email=${encodeURIComponent(customer.email || "")}&phoneNumber=${encodeURIComponent(customer.phoneNumber || "")}`,
+            )
+            .catch(() => null);
+          foundLeadId = leadResult?.success && leadResult.data?._id ? leadResult.data._id : null;
+          if (foundLeadId) setLeadId(foundLeadId);
+        }
+        const ids = [foundLeadId, customerId].filter(Boolean).map(String);
+        const qs = new URLSearchParams({ limit: "200" });
+        if (foundLeadId) qs.set("leadID", String(foundLeadId));
+        if (customerId) qs.set("customerID", String(customerId));
+        if (customer.email) qs.set("email", customer.email);
+        const results = [
+          await api.get(`/api/emailHistory/contact?${qs.toString()}`).catch(() => null),
+        ];
+        const byId = new Map();
+        let anySuccess = false;
+        const forbidden = results.some((r) => r?.status === 403);
+        for (const r of results) {
+          if (!r?.success) continue;
+          anySuccess = true;
+          const rows = Array.isArray(r.data) ? r.data : r.data?.emails || r.data?.data || [];
+          for (const m of rows) byId.set(String(m._id), m);
+        }
+        if (!anySuccess && ids.length) {
+          setEmailLoadForbidden(forbidden);
+          setEmailLoadError(
+            forbidden
+              ? "You don't have permission to view email history."
+              : "Couldn't load emails. Please try again.",
+          );
+        }
+        if (anySuccess || !ids.length)
+          setEmailHistory((prev) => {
+            const server = [...byId.values()];
+            // Keep optimistic rows until the server returns a matching subject.
+            const pending = prev.filter(
+              (p) =>
+                String(p._id).startsWith("tmp-") &&
+                !server.some((s) => s.subject === p.subject && s.to === p.to),
+            );
+            return [...server, ...pending].sort(
+              (x, y) =>
+                new Date(x.sentAt || x.createdAt) - new Date(y.sentAt || y.createdAt),
+            );
+          });
+      } catch (error) {
+        console.error("Failed to load email history:", error);
+        setEmailLoadError("Couldn't load emails. Please try again.");
+      }
+      setLoadingEmailHistory(false);
+    },
+    [customerId, customer, leadId],
+  );
+
+  useEffect(() => {
+    if (activeTab !== "messages" || msgMode !== "email") return;
+    loadEmailHistory();
+    // leadId is resolved inside; avoid refetch loop by keying on tab/mode/customer only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, msgMode, customerId, customer]);
+
+  useEffect(() => {
+    if (activeTab !== "messages" || msgMode !== "email") return;
+    const el = emailThreadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [emailHistory, activeTab, msgMode, loadingEmailHistory]);
+
+  // Plain-text preview of an email body: strip tags/styles and decode common entities.
+  function emailPlainText(raw) {
+    return String(raw || "")
+      .replace(/<(style|script)[\s\S]*?<\/\1>/gi, "")
+      .replace(/<br\s*\/?>|<\/(p|div|li|tr|h[1-6])>/gi, "\n")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
 
   async function handleSendMessage() {
+    if (isSendingMsg) return;
+    try {
+      await sendMessageInner();
+    } catch (error) {
+      console.error("Failed to send message:", error);
+      setMsgError("Something went wrong sending. Please try again.");
+    } finally {
+      setIsSendingMsg(false);
+    }
+  }
+
+  async function sendMessageInner() {
     setMsgError(null);
     setMsgSuccess(null);
     if (!customer) return;
@@ -884,29 +1030,45 @@ export default function MiniStudentPanel({
         return;
       }
       setIsSendingMsg(true);
-      const result = await api.post("/api/sms/send-one", {
-        lead: {
-          _id: leadId,
-          phoneNumber: customer.phoneNumber,
-          email: customer.email,
-          name: customer.name,
+      const smsLocationIDs = Array.isArray(customer.locationID)
+        ? customer.locationID.map((id) => String(id?._id ?? id)).filter(Boolean)
+        : customer.locationID
+          ? [String(customer.locationID?._id ?? customer.locationID)]
+          : [];
+      const body = smsText.trim();
+      const result = await api.post(
+        "/api/sms/send-one",
+        {
+          lead: {
+            ...(leadId ? { _id: leadId } : {}),
+            phoneNumber: customer.phoneNumber,
+            email: customer.email,
+            name: customer.name,
+            ...(smsLocationIDs.length ? { locationID: smsLocationIDs } : {}),
+          },
+          message: body,
+          scheduleNow: true,
         },
-        message: smsText.trim(),
-        scheduleNow: true,
-      });
+        smsLocationIDs[0]
+          ? { headers: { "x-location-id": smsLocationIDs[0] } }
+          : {},
+      );
       if (result.success) {
-        const optimistic = {
-          _id: Date.now(),
-          from: "you",
-          to: customer.phoneNumber,
-          message: smsText.trim(),
-          status: "queued",
-          createdAt: new Date().toISOString(),
-        };
-        setSmsHistory((prev) => [...prev, optimistic]);
+        setSmsHistory((prev) => [
+          ...prev,
+          {
+            _id: `tmp-${Date.now()}`,
+            from: "you",
+            to: customer.phoneNumber,
+            message: body,
+            status: "sent",
+            createdAt: new Date().toISOString(),
+          },
+        ]);
         setSmsText("");
+        loadSmsHistory({ silent: true });
       } else {
-        setMsgError(result.error || "Failed to send SMS.");
+        setMsgError(result.error || result.message || "Failed to send SMS.");
       }
     } else {
       if (!emailSubject.trim() || !emailBody.trim()) {
@@ -928,7 +1090,7 @@ export default function MiniStudentPanel({
         "/api/email/send-one",
         {
           lead: {
-            _id: leadId,
+            ...(leadId ? { _id: leadId } : {}),
             email: customer.email,
             name: customer.name,
             ...(locationIDs.length ? { locationID: locationIDs } : {}),
@@ -942,10 +1104,29 @@ export default function MiniStudentPanel({
           : {},
       );
       if (result.success) {
-        setMsgSuccess("Email sent.");
+        setMsgSuccess(`Email sent to ${customer.email}.`);
+        setEmailHistory((prev) => [
+          ...prev,
+          {
+            _id: `tmp-${Date.now()}`,
+            from: "you",
+            to: customer.email,
+            subject: emailSubject.trim(),
+            body: emailBody.trim(),
+            status: "queued",
+            createdAt: new Date().toISOString(),
+          },
+        ]);
         setEmailSubject("");
         setEmailBody("");
-      } else setMsgError(result.error || "Failed to send email.");
+        loadEmailHistory({ silent: true });
+        setTimeout(() => loadEmailHistory({ silent: true }), 2500);
+      } else
+        setMsgError(
+          result.status === 403
+            ? "You don't have permission to send emails."
+            : result.error || result.message || "Failed to send email.",
+        );
     }
     setIsSendingMsg(false);
   }
@@ -1752,81 +1933,251 @@ export default function MiniStudentPanel({
               {msgMode === "sms" ? (
                 <div className="space-y-2">
                   {/* Conversation thread */}
-                  <div className="h-48 overflow-y-auto flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-2">
-                    {loadingSmsHistory ? (
-                      <p className="text-[10px] text-muted-foreground text-center pt-4">
-                        Loading…
-                      </p>
+                  <div
+                    ref={smsThreadRef}
+                    role="log"
+                    aria-label="Text message conversation"
+                    aria-live="polite"
+                    className="h-72 overflow-y-auto flex flex-col gap-1.5 rounded-xl border border-border bg-muted/30 p-3"
+                  >
+                    {loadingSmsHistory && smsHistory.length === 0 ? (
+                      <div className="flex flex-col gap-2 animate-pulse">
+                        <div className="h-7 w-2/3 rounded-xl bg-muted" />
+                        <div className="h-7 w-1/2 self-end rounded-xl bg-muted" />
+                        <div className="h-7 w-3/5 rounded-xl bg-muted" />
+                      </div>
+                    ) : smsLoadError && smsHistory.length === 0 ? (
+                      <div className="m-auto text-center space-y-2">
+                        <p className="text-[11px] text-destructive">{smsLoadError}</p>
+                        <button
+                          type="button"
+                          onClick={() => loadSmsHistory()}
+                          className="h-7 rounded-lg border border-border px-3 text-[11px] font-medium hover:bg-muted/60"
+                        >
+                          Retry
+                        </button>
+                      </div>
                     ) : smsHistory.length === 0 ? (
-                      <p className="text-[10px] text-muted-foreground text-center pt-4">
-                        No messages yet.
-                      </p>
+                      <div className="m-auto text-center">
+                        <p className="text-[12px] font-medium text-foreground">
+                          No messages yet
+                        </p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                          Say hello to {customer?.name?.split(" ")[0] || "your student"} below.
+                        </p>
+                      </div>
                     ) : (
-                      smsHistory.map((msg) => {
+                      smsHistory.map((msg, i) => {
                         const isInbound = msg.status === "received";
+                        const prev = smsHistory[i - 1];
+                        const dayKey = (d) => new Date(d).toDateString();
+                        const newDay =
+                          !prev || dayKey(prev.createdAt) !== dayKey(msg.createdAt);
+                        const failed =
+                          msg.status === "failed" || msg.status === "undelivered";
                         return (
-                          <div
-                            key={msg._id}
-                            className={`flex flex-col ${isInbound ? "items-start" : "items-end"}`}
-                          >
+                          <div key={msg._id} className="flex flex-col gap-1.5">
+                            {newDay && (
+                              <div className="flex items-center gap-2 py-1">
+                                <div className="h-px flex-1 bg-border" />
+                                <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                                  {new Date(msg.createdAt).toLocaleDateString(undefined, {
+                                    weekday: "short",
+                                    month: "short",
+                                    day: "numeric",
+                                  })}
+                                </span>
+                                <div className="h-px flex-1 bg-border" />
+                              </div>
+                            )}
                             <div
-                              className={`max-w-[85%] px-2.5 py-1.5 rounded-xl text-[11px] leading-snug ${isInbound ? "bg-card border border-border text-foreground" : "bg-brand text-brand-foreground"}`}
+                              className={`flex flex-col ${isInbound ? "items-start" : "items-end"}`}
                             >
-                              {msg.message}
+                              <div
+                                title={formatStudioTime(msg.createdAt)}
+                                className={`max-w-[85%] whitespace-pre-wrap break-words px-3 py-1.5 text-[12px] leading-snug shadow-sm ${
+                                  isInbound
+                                    ? "rounded-2xl rounded-bl-sm bg-card border border-border text-foreground"
+                                    : failed
+                                      ? "rounded-2xl rounded-br-sm bg-destructive/10 border border-destructive/40 text-destructive"
+                                      : "rounded-2xl rounded-br-sm bg-brand text-brand-foreground"
+                                }`}
+                              >
+                                {msg.message}
+                              </div>
+                              <span className="text-[9px] text-muted-foreground mt-0.5 px-1">
+                                {formatStudioTime(msg.createdAt)}
+                                {!isInbound && msg.status && msg.status !== "sent"
+                                  ? ` · ${msg.status}`
+                                  : ""}
+                              </span>
                             </div>
-                            <span className="text-[9px] text-muted-foreground mt-0.5 px-1">
-                              {isInbound
-                                ? msg.leadID?.name ||
-                                  customer?.name ||
-                                  "Customer"
-                                : "You"}{" "}
-                              ·{" "}
-                              {formatStudioTime(msg.createdAt)}
-                            </span>
                           </div>
                         );
                       })
                     )}
                   </div>
                   {/* Composer */}
-                  <p className="text-[10px] text-muted-foreground">
-                    To:{" "}
-                    {customer?.phoneNumber || (
-                      <span className="text-destructive">No phone number</span>
-                    )}
-                  </p>
+                  <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span>
+                      To:{" "}
+                      {customer?.phoneNumber || (
+                        <span className="text-destructive">No phone number on file</span>
+                      )}
+                    </span>
+                    <span>
+                      {smsText.length} chars
+                      {smsText.length > 160
+                        ? ` · ${Math.ceil(smsText.length / 153)} segments`
+                        : ""}
+                    </span>
+                  </div>
                   <textarea
                     rows={3}
+                    aria-label="Text message"
                     value={smsText}
+                    disabled={!customer?.phoneNumber}
                     onChange={(e) => setSmsText(e.target.value)}
-                    placeholder="Type your message…"
-                    className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-[12px] text-foreground outline-none focus:border-primary"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        if (!isSendingMsg) handleSendMessage();
+                      }
+                    }}
+                    placeholder="Type your message… (Enter to send, Shift+Enter for new line)"
+                    className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-[12px] text-foreground outline-none focus:border-primary disabled:opacity-60"
                   />
-                  <p className="text-[10px] text-muted-foreground text-right">
-                    {smsText.length} chars
-                  </p>
                 </div>
               ) : (
                 <div className="space-y-2">
+                  <div
+                    ref={emailThreadRef}
+                    role="log"
+                    aria-label="Email conversation"
+                    aria-live="polite"
+                    className="h-72 overflow-y-auto flex flex-col gap-2 rounded-xl border border-border bg-muted/30 p-3"
+                  >
+                    {loadingEmailHistory && emailHistory.length === 0 ? (
+                      <div className="flex flex-col gap-2 animate-pulse">
+                        <div className="h-14 w-4/5 rounded-xl bg-muted" />
+                        <div className="h-14 w-3/4 self-end rounded-xl bg-muted" />
+                      </div>
+                    ) : emailLoadError && emailHistory.length === 0 ? (
+                      <div className="m-auto text-center space-y-2">
+                        <p className="text-[11px] text-destructive">{emailLoadError}</p>
+                        {!emailLoadForbidden && (
+                          <button
+                            type="button"
+                            onClick={() => loadEmailHistory()}
+                            className="h-7 rounded-lg border border-border px-3 text-[11px] font-medium hover:bg-muted/60"
+                          >
+                            Retry
+                          </button>
+                        )}
+                      </div>
+                    ) : emailHistory.length === 0 ? (
+                      <div className="m-auto text-center">
+                        <p className="text-[12px] font-medium text-foreground">
+                          No emails yet
+                        </p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                          Emails sent to {customer?.name?.split(" ")[0] || "your student"} will appear here.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        {emailLoadError && (
+                          <p className="text-[10px] text-destructive">
+                            {emailLoadError} Showing earlier results.
+                          </p>
+                        )}
+                        {emailHistory.map((em) => {
+                          const when = em.sentAt || em.createdAt;
+                          const isInbound =
+                            em.direction === "inbound" ||
+                            (customer?.email &&
+                              String(em.from || "").toLowerCase().includes(
+                                String(customer.email).toLowerCase(),
+                              ));
+                          const text = emailPlainText(em.body);
+                          const open = !!expandedEmails[em._id];
+                          const long = text.length > 160 || text.split("\n").length > 3;
+                          const failed = ["failed", "bounce", "bounced", "dropped"].includes(
+                            String(em.status || "").toLowerCase(),
+                          );
+                          return (
+                            <div
+                              key={em._id}
+                              className={`flex flex-col ${isInbound ? "items-start" : "items-end"}`}
+                            >
+                              <div
+                                className={`max-w-[92%] rounded-xl border px-3 py-2 text-[11px] shadow-sm ${
+                                  failed
+                                    ? "border-destructive/40 bg-destructive/10"
+                                    : isInbound
+                                      ? "border-border bg-card"
+                                      : "border-border bg-background"
+                                }`}
+                              >
+                                <p className="font-semibold text-foreground break-words">
+                                  {em.subject || "(no subject)"}
+                                </p>
+                                <p
+                                  className={`mt-0.5 whitespace-pre-wrap break-words text-muted-foreground ${
+                                    open ? "" : "line-clamp-3"
+                                  }`}
+                                >
+                                  {text || "(empty message)"}
+                                </p>
+                                {long && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setExpandedEmails((p) => ({ ...p, [em._id]: !p[em._id] }))
+                                    }
+                                    className="mt-1 text-[10px] font-medium text-primary hover:underline"
+                                  >
+                                    {open ? "Show less" : "Show more"}
+                                  </button>
+                                )}
+                              </div>
+                              <span className="text-[9px] text-muted-foreground mt-0.5 px-1">
+                                {isInbound ? "Received" : "Sent"} · {formatStudioTime(when)}
+                                {em.status && em.status !== "sent" ? ` · ${em.status}` : ""}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
+                  </div>
                   <p className="text-[10px] text-muted-foreground">
                     To:{" "}
                     {customer?.email || (
-                      <span className="text-destructive">No email</span>
+                      <span className="text-destructive">No email on file — add one to send</span>
                     )}
                   </p>
                   <input
                     type="text"
+                    aria-label="Email subject"
                     value={emailSubject}
+                    disabled={!customer?.email}
                     onChange={(e) => setEmailSubject(e.target.value)}
                     placeholder="Subject"
-                    className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[12px] text-foreground outline-none focus:border-primary"
+                    className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[12px] text-foreground outline-none focus:border-primary disabled:opacity-60"
                   />
                   <textarea
-                    rows={5}
+                    rows={4}
+                    aria-label="Email body"
                     value={emailBody}
-                    onChange={(e) => setEmailBody(e.target.value)}
+                    disabled={!customer?.email}
+                    onChange={(e) => {
+                      setEmailBody(e.target.value);
+                      e.target.style.height = "auto";
+                      e.target.style.height = `${Math.min(e.target.scrollHeight, 220)}px`;
+                    }}
                     placeholder="Message body…"
-                    className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-[12px] text-foreground outline-none focus:border-primary"
+                    className="w-full resize-none overflow-y-auto rounded-lg border border-border bg-background px-3 py-2 text-[12px] text-foreground outline-none focus:border-primary disabled:opacity-60"
                   />
                 </div>
               )}
@@ -1841,7 +2192,18 @@ export default function MiniStudentPanel({
               <button
                 type="button"
                 onClick={handleSendMessage}
-                disabled={isSendingMsg}
+                disabled={
+                  isSendingMsg ||
+                  (msgMode === "email" && !customer?.email) ||
+                  (msgMode === "sms" && !customer?.phoneNumber)
+                }
+                title={
+                  msgMode === "email" && !customer?.email
+                    ? "No email on file"
+                    : msgMode === "sms" && !customer?.phoneNumber
+                      ? "No phone number on file"
+                      : undefined
+                }
                 className="w-full h-9 rounded-lg bg-brand text-[12px] font-semibold text-brand-foreground hover:bg-brand-dark disabled:opacity-60"
               >
                 {isSendingMsg

@@ -13,6 +13,7 @@ import { Switch } from '@/components/ui/switch'
 import api from '@/lib/api'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
+import AvailabilityEditor, { normalizeAvailability, availabilityPayload } from '@/components/teachers/AvailabilityEditor'
 
 export default function UsersDialog({ open, onClose, users = [], onRefresh, initialUserId = null, rolesList = [] }) {
   const [editingUser, setEditingUser] = useState(null)
@@ -92,6 +93,7 @@ export default function UsersDialog({ open, onClose, users = [], onRefresh, init
           status: editingUser.status || 'active',
           showOnCalendar: editingUser.showOnCalendar ?? null,
           ...(effectiveShowOnCalendar ? { weeklyCapacity } : {}),
+          ...(effectiveShowOnCalendar && editingUser._availability ? { availability: availabilityPayload(editingUser._availability) } : {}),
         })
         if (result.success) {
           toast.success({ title: 'Saved', message: 'User updated' })
@@ -111,6 +113,7 @@ export default function UsersDialog({ open, onClose, users = [], onRefresh, init
           permissions: editingUser.permissions,
           showOnCalendar: editingUser.showOnCalendar ?? null,
           ...(effectiveShowOnCalendar ? { weeklyCapacity } : {}),
+          ...(effectiveShowOnCalendar && editingUser._availability ? { availability: availabilityPayload(editingUser._availability) } : {}),
         })
         if (result.success) {
           toast.success({ title: 'Invite sent', message: `An invite email was sent to ${editingUser.email}` })
@@ -125,6 +128,7 @@ export default function UsersDialog({ open, onClose, users = [], onRefresh, init
         const result = await api.post('/api/user', {
           ...editingUser,
           ...(effectiveShowOnCalendar ? { weeklyCapacity } : {}),
+          ...(effectiveShowOnCalendar && editingUser._availability ? { availability: availabilityPayload(editingUser._availability) } : {}),
         })
         if (result.success) {
           toast.success({ title: 'Created', message: 'User created' })
@@ -268,8 +272,20 @@ export default function UsersDialog({ open, onClose, users = [], onRefresh, init
                     className="max-w-[160px]"
                   />
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Lessons/sessions this person can be booked for per week. Used by the Instructor Utilization dashboard widget.
+                    Lessons/sessions this person can be booked for per week. Used by the Instructor Utilization dashboard widget when no availability is set below.
                   </p>
+                </div>
+              )}
+
+              {effectiveShowOnCalendar && (
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1.5">
+                    Availability (used for instructor utilization)
+                  </label>
+                  <AvailabilityEditor
+                    value={editingUser._availability ?? normalizeAvailability(editingUser.availability)}
+                    onChange={(v) => setEditingUser((p) => ({ ...p, _availability: v }))}
+                  />
                 </div>
               )}
             </div>

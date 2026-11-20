@@ -23,7 +23,8 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import LocationSelector from "@/components/shared/LocationSelector";
 import MiniStudentPanel from "./MiniStudentPanel";
 import { roundSessions } from "@/lib/utils";
-import { resolveEventPayment } from "@/lib/event-payment";
+import { resolveEventPayment, isNoChargeOutcome } from "@/lib/event-payment";
+import { describeBooking } from "@/lib/booking-info";
 import CreateEnrollmentSheet from "@/components/enrollment/CreateEnrollmentSheet";
 import GroupClassDrawer from "@/app/calendar/group-classes/components/GroupClassDrawer";
 
@@ -157,7 +158,7 @@ function isUnallocated(event) {
 // `ev` must be the event as GET /api/calendar/:id returns it (packages populated);
 // `ctx` is the calendar's buildPackageSessionOrder() of the events it loaded.
 function chargeCoversPayment(ch, ev, ctx) {
-  if (ch.method !== "package") return true;
+  if (ch.method !== "package" && !isNoChargeOutcome(ev)) return true;
   return resolveEventPayment(ev, { ...ctx, customerID: ch.customerID }).paid;
 }
 
@@ -485,11 +486,16 @@ function GroupStudentRoster({
       const pkgServices = enrollment.package?.services ?? [];
       const isActive =
         enrollment.status === "active" && enrollment.package?.status === "active";
+      // A student can be added only if they hold credit for THIS class's service. Matching
+      // any group-type service let someone with only Practice Party credit (a separate
+      // group service) appear for a Group Class they have none left for; their booking
+      // would then be charged against the class's own service and have no credit.
+      // Only an event with no service of its own falls back to "any group service".
+      const coversThisEvent = (s) =>
+        serviceCode ? s.serviceCode === serviceCode : groupCodes.has(s.serviceCode);
       if (
         isActive &&
-        pkgServices.some(
-          (s) => groupCodes.has(s.serviceCode) && (s.sessionsRemaining ?? 0) > 0,
-        )
+        pkgServices.some((s) => coversThisEvent(s) && (s.sessionsRemaining ?? 0) > 0)
       ) {
         const cid = String(
           enrollment.customerID?._id ?? enrollment.customerID ?? "",
@@ -2267,6 +2273,36 @@ export default function EventDetailPanel({
                       </p>
                     </div>
                   )}
+
+                  {(() => {
+                    const booking = describeBooking(event);
+                    if (!booking.by && !booking.at) return null;
+                    return (
+                      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 space-y-0.5">
+                        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                          Booked
+                        </p>
+                        <p className="text-[13px] text-foreground">
+                          {booking.by ? (
+                            <>
+                              by <span className="font-semibold">{booking.by}</span>
+                              {booking.email ? (
+                                <span className="text-muted-foreground"> ({booking.email})</span>
+                              ) : null}
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">Booked by: not recorded</span>
+                          )}
+                        </p>
+                        {booking.at ? (
+                          <p className="text-[12px] text-muted-foreground">
+                            {formatDisplayDate(booking.at, studioTz)} at{" "}
+                            {formatDisplayTime(booking.at, studioTz)}
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
 
                   {event.payment?.collected && (
                     <div className="rounded-lg border border-success/40 bg-success/5 px-3 py-2 flex items-center justify-between gap-2">

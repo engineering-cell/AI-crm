@@ -1,6 +1,7 @@
 'use client'
 
 import { ChevronDown } from 'lucide-react'
+import { NAMED_RANGE_OPTIONS } from '@/lib/dashboardRanges'
 
 const OPTIONS = [
   // 0 is the studio's current day so far. Without this option the select could not
@@ -10,6 +11,7 @@ const OPTIONS = [
   { label: 'Last 30 days', days: 30 },
   { label: 'Last 90 days', days: 90 },
   { label: 'Last 12 months', days: 365 },
+  ...NAMED_RANGE_OPTIONS.filter((o) => o.value !== 'today').map((o) => ({ label: o.label, days: o.value })),
 ]
 
 function isCustomRange(value) {
@@ -30,7 +32,7 @@ export default function RangeDropdown({ value, onChange }) {
     <div className="relative">
       <select
         value={custom ? 'custom' : value}
-        onChange={(e) => onChange(Number(e.target.value))}
+        onChange={(e) => onChange(/^[0-9]+$/.test(e.target.value) ? Number(e.target.value) : e.target.value)}
         className="h-7 appearance-none rounded-md border border-border bg-background py-0 pl-2.5 pr-6 text-[12px] font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
       >
         {custom && (

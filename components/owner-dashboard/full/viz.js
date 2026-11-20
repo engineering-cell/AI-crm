@@ -68,6 +68,7 @@ export function RankedBars({
         return (
           <div
             key={`${r.label}-${i}`}
+            title={`${r.label}: ${Number(r.value).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
             className="grid items-center gap-3 py-[7px]"
             style={{ gridTemplateColumns: `minmax(0,${labelWidth}px) 1fr 78px` }}
           >
@@ -302,7 +303,7 @@ export function Flow({ children, stages = 2 }) {
 /** `items`: { label, value, rows: { label, value }[] }[] */
 export function DrillAccordion({ items = [] }) {
   return (
-    <div className="mt-3">
+    <div className="mt-3 max-h-56 overflow-y-auto pr-1">
       {items.map((item, i) => (
         <details
           key={item.label}
@@ -326,6 +327,18 @@ export function DrillAccordion({ items = [] }) {
           </div>
         </details>
       ))}
+    </div>
+  )
+}
+
+/**
+ * A chart slot that takes whatever height its card has left (min `min`px), so a short chart
+ * beside a tall table fills the card instead of leaving a gap under it.
+ */
+export function Fill({ children, min = 200 }) {
+  return (
+    <div className="relative mt-3 flex-1" style={{ minHeight: min }}>
+      <div className="absolute inset-0">{children}</div>
     </div>
   )
 }

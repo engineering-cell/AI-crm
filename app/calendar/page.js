@@ -14,7 +14,7 @@ import AppointmentComposerPanel from "./components/AppointmentComposerPanel";
 import EventDetailPanel from "./components/EventDetailPanel";
 import api from "@/lib/api";
 import { cn, formatDate, roundSessions } from "@/lib/utils";
-import { toStudioLocalDate, formatStudioDate, formatStudioTime } from "@/lib/studioLocalDate";
+import { toStudioLocalDate, formatStudioDate, formatStudioTime, studioNow } from "@/lib/studioLocalDate";
 import { describeBooking, escapeHtml } from "@/lib/booking-info";
 import { deriveEffectiveStatus } from "@/lib/eventStatus";
 import { buildPackageSessionOrder, resolveEventPayment } from "@/lib/event-payment";
@@ -4062,6 +4062,10 @@ function CalendarPageInner() {
                       headerToolbar={false}
                       height="auto"
                       nowIndicator
+                      // The lesson cards are placed in the studio's wall-clock time, so the red
+                      // "now" line has to be too - otherwise a browser in another timezone sees
+                      // it at the wrong hour (e.g. 2:35 PM while it is 3:35 PM at the studio).
+                      now={() => studioNow(studioTz)}
                       allDaySlot
                       slotMinTime={visibleWindow.effectiveSlotMinStr}
                       slotMaxTime={visibleWindow.effectiveSlotMaxStr}

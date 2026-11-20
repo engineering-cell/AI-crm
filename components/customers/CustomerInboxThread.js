@@ -75,6 +75,8 @@ function contactFromCustomer(customer, leadId = null, type = 'Customer') {
     phoneNumber: customer.phoneNumber || '',
     email: customer.email || '',
     locationID: customer.locationID || [],
+    // Household members (partner / family) - texted, called and emailed from the same thread.
+    members: Array.isArray(customer.members) ? customer.members : [],
   }
 }
 
@@ -604,12 +606,16 @@ export default function CustomerInboxThread({
     scheduleNow = true,
     scheduleDate = null,
     contentHtml = null,
+    // A household member picked in the thread (instead of the account holder).
+    recipient = null,
   }) => {
     if (!(String(contentHtml || content || '').trim())) return false
 
     const effectiveChannel = channel || 'SMS'
-    const leadRecipient = buildLeadRecipient(contact, {
-      ...contact,
+    // Email to a member goes to their address, still on this account's thread.
+    const emailContact = recipient?.email ? { ...contact, email: recipient.email } : contact
+    const leadRecipient = buildLeadRecipient(emailContact, {
+      ...emailContact,
       _id: leadId && isMongoId(leadId) ? leadId : undefined,
     })
 
@@ -676,7 +682,7 @@ export default function CustomerInboxThread({
 
     try {
       if (effectiveChannel === 'SMS') {
-        const phoneNumber = contact.phoneNumber || customer.phoneNumber
+        const phoneNumber = recipient?.phoneNumber || contact.phoneNumber || customer.phoneNumber
         if (!phoneNumber) {
           revertOptimisticMessage(messageId)
           toast.error({
@@ -775,7 +781,8 @@ export default function CustomerInboxThread({
     }
   }
 
-  const handlePlaceCall = useCallback(async () => {
+  // `recipient`: a household member to call instead of the account holder.
+  const handlePlaceCall = useCallback(async (recipient = null) => {
     if (activeOutboundCall) {
       toast.error({
         title: 'Call in progress',
@@ -784,7 +791,7 @@ export default function CustomerInboxThread({
       return
     }
 
-    const phoneNumber = contact.phoneNumber || customer.phoneNumber
+    const phoneNumber = recipient?.phoneNumber || contact.phoneNumber || customer.phoneNumber
     if (!phoneNumber) {
       toast.error({
         title: 'Missing phone',
@@ -796,7 +803,7 @@ export default function CustomerInboxThread({
     setCallPlacing(true)
     endingOutboundRef.current = false
     const attempt = ++outboundAttemptRef.current
-    const displayName = getContactDisplayName(contact)
+    const displayName = recipient?.label || getContactDisplayName(contact)
     setActiveOutboundCall({
       id: `pending-${Date.now()}`,
       name: displayName,
@@ -814,7 +821,7 @@ export default function CustomerInboxThread({
       const leadPayload = {
         ...(leadId && isMongoId(leadId) ? { _id: leadId } : {}),
         phoneNumber,
-        name: getContactDisplayName(contact),
+        name: recipient?.name || getContactDisplayName(contact),
         locationID: locationIdsFrom(contact.locationID || customer.locationID),
       }
       const result = await api.post('/api/human-call/call-now', { lead: leadPayload })

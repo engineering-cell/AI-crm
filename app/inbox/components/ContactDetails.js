@@ -7,6 +7,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/toast'
 import { formatDateTime, getInitials, nameWithMembers } from '@/lib/utils'
+import { callbackInputValue } from '@/lib/location-time'
 
 export default function ContactDetails({
   contact,
@@ -120,7 +121,7 @@ export default function ContactDetails({
         <div key={lead._id}>
           <CallbackDateSection
             contactPath={`/api/${contactKind}/${lead._id}`}
-            callbackDate={lead.callbackDate}
+            callbackDate={callbackInputValue(lead)}
             onPatched={(patch) => onContactPatched?.(lead._id, patch)}
           />
           <NotesSection
@@ -154,7 +155,7 @@ const toDateInputValue = (value) => (value ? String(value).slice(0, 10) : '')
 
 function CallbackDateSection({ contactPath, callbackDate, onPatched }) {
   const toast = useToast()
-  const saved = toDateInputValue(callbackDate)
+  const saved = callbackDate || ''
   const [draft, setDraft] = useState(saved)
   const [saving, setSaving] = useState(false)
 

@@ -7,6 +7,7 @@ import NewEnrollmentPackageInline, { enrollmentLinkTarget } from '@/app/calendar
 import AssignMembershipForm from '@/components/membership/AssignMembershipForm'
 import { sendPaymentLink } from '@/components/payments/SendPaymentLinkMenu'
 import api from '@/lib/api'
+import { useToast } from '@/components/ui/toast'
 import { nameWithMembers } from '@/lib/utils'
 import { dateInputToISO } from '@/lib/studioLocalDate'
 
@@ -28,6 +29,7 @@ export default function CreateEnrollmentSheet({
 }) {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const toast = useToast()
   const [mode, setMode] = useState(initialMode)
   // Set while a "Review and Pay" agreement session is pending student
   // acceptance — the enrollment/package isn't created and nothing is charged
@@ -324,6 +326,18 @@ export default function CreateEnrollmentSheet({
 
     if (linkContractID) {
       api.patch(`/api/agreement-session/${linkContractID}/link-payment`, { enrollmentID }).catch(() => {})
+    }
+
+    // Tell staff what happened to the student's unallocated lessons: how many the new program
+    // claimed (including ones that already took place) and why any were left behind.
+    const allocation = addRes.data?.allocation
+    if (allocation && (allocation.allocated > 0 || allocation.skipped > 0 || allocation.blocked)) {
+      const note = String(addRes.message || '').replace(/^Package (assigned|added) — /, '')
+      if (note && note !== String(addRes.message || '')) {
+        const hadProblem = allocation.skipped > 0 || Boolean(allocation.blocked)
+        const showToast = hadProblem ? toast.error : toast.success
+        showToast({ title: 'Unallocated lessons', message: note })
+      }
     }
 
     setSubmitting(false)

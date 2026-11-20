@@ -14,7 +14,8 @@ import AppointmentComposerPanel from "./components/AppointmentComposerPanel";
 import EventDetailPanel from "./components/EventDetailPanel";
 import api from "@/lib/api";
 import { cn, formatDate, roundSessions } from "@/lib/utils";
-import { toStudioLocalDate } from "@/lib/studioLocalDate";
+import { toStudioLocalDate, formatStudioDate, formatStudioTime, studioNow } from "@/lib/studioLocalDate";
+import { describeBooking, escapeHtml } from "@/lib/booking-info";
 import { deriveEffectiveStatus } from "@/lib/eventStatus";
 import { buildPackageSessionOrder, resolveEventPayment } from "@/lib/event-payment";
 import { getCurrentUserId, getEffectiveBranch } from "@/lib/auth";
@@ -1325,6 +1326,13 @@ function showEventTooltip(e, props) {
     ${section("Instructor", teacher)}
     ${section("Service", serviceName + (serviceCode && serviceCode !== serviceName ? ` <span style="opacity:.6">(${serviceCode})</span>` : ""))}
     ${section("Price", servicePrice)}
+    ${(() => {
+      const booking = describeBooking(raw);
+      if (!booking.by && !booking.at) return "";
+      const tz = props._studioTz || undefined;
+      const when = booking.at ? `${formatStudioDate(booking.at, tz, { year: "numeric" })} · ${formatStudioTime(booking.at, tz)}` : "";
+      return section("Booked by", booking.by ? escapeHtml(booking.by) : "Not recorded") + section("Booked on", escapeHtml(when));
+    })()}
     ${divider}
     ${packageName ? section("Package", packageName) : ""}
     ${packageExpiry ? section("Expires", packageExpiry) : ""}
@@ -4054,6 +4062,10 @@ function CalendarPageInner() {
                       headerToolbar={false}
                       height="auto"
                       nowIndicator
+                      // The lesson cards are placed in the studio's wall-clock time, so the red
+                      // "now" line has to be too - otherwise a browser in another timezone sees
+                      // it at the wrong hour (e.g. 2:35 PM while it is 3:35 PM at the studio).
+                      now={() => studioNow(studioTz)}
                       allDaySlot
                       slotMinTime={visibleWindow.effectiveSlotMinStr}
                       slotMaxTime={visibleWindow.effectiveSlotMaxStr}

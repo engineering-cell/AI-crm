@@ -9,8 +9,9 @@ import { nameWithMembers } from '@/lib/utils'
 
 const CHANNEL_LABEL = { SMS: 'Messages', Email: 'Email', Call: 'Calls' }
 
-/** Inbox thread for one lead in a popup, opened on the SMS, Email or Call tab. */
-export default function LeadCommunicationDialog({ lead, channel = 'SMS', onClose }) {
+/** Inbox thread for one lead (or, with contactType="Customer", one customer) in a popup, opened on the SMS, Email or Call tab. */
+export default function LeadCommunicationDialog({ lead, channel = 'SMS', contactType = 'Lead', onClose }) {
+  const isCustomer = contactType === 'Customer'
   const [callLive, setCallLive] = useState(false)
   const [dismissed, setDismissed] = useState(false)
   const sessionRef = useRef(null)
@@ -65,7 +66,7 @@ export default function LeadCommunicationDialog({ lead, channel = 'SMS', onClose
           </p>
           <div className="flex shrink-0 items-center gap-1">
             <Link
-              href="/inbox?filter=leads"
+              href={isCustomer ? '/inbox?filter=customers' : '/inbox?filter=leads'}
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               <ExternalLink className="h-3.5 w-3.5" />
@@ -85,14 +86,14 @@ export default function LeadCommunicationDialog({ lead, channel = 'SMS', onClose
           key={`${shown._id}-${shownChannel}`}
           customer={{
             _id: shown._id,
-            leadSourceID: shown._id,
+            leadSourceID: isCustomer ? shown.leadSourceID : shown._id,
             name: shown.name,
             members: shown.members,
             email: shown.email,
             phoneNumber: shown.phoneNumber,
             locationID: shown.locationID,
           }}
-          contactType="Lead"
+          contactType={contactType}
           initialChannel={shownChannel}
           onOutboundCallChange={setCallLive}
         />

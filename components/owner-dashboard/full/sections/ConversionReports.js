@@ -243,7 +243,10 @@ function Report2({ reports }) {
         { label: 'Avg sale', value: money(b.avgSale) },
         { label: 'Cash at sale', value: money(b.avgCashAtSale) },
         { label: 'Collected', value: pct1(b.collectionRatePct) },
-        { label: 'Avg units', value: b.avgUnits },
+        { label: 'Private units', value: b.avgPrivateUnits },
+        { label: 'Group units', value: b.avgGroupUnits },
+        { label: '$ / private lesson', value: money(b.avgPricePerPrivateUnit) },
+        { label: '$ / group lesson', value: money(b.avgPricePerGroupUnit) },
       ]}
     />
   )
@@ -261,7 +264,10 @@ function Report3({ reports }) {
       { label: 'Avg sale', value: money(s.avgSale) },
       { label: 'Cash at sale', value: money(s.avgCash) },
       { label: 'Collected', value: pct1(s.collectionRatePct) },
-      { label: 'Units', value: s.avgUnits },
+      { label: 'Private units', value: s.avgPrivateUnits },
+      { label: 'Group units', value: s.avgGroupUnits },
+      { label: '$ / private lesson', value: money(s.avgPricePerPrivateUnit) },
+      { label: '$ / group lesson', value: money(s.avgPricePerGroupUnit) },
       { label: 'Median days', value: dash(s.medianDaysFromPrev) },
     ],
     mix: s.mix,
@@ -294,7 +300,10 @@ function Report4({ reports }) {
       { label: 'Avg sale', value: money(s.avgSale) },
       { label: 'Cash at sale', value: money(s.avgCash) },
       { label: 'Time in program', value: s.avgDaysInProgram === null ? '—' : `${s.avgDaysInProgram} days` },
-      { label: 'Units', value: s.avgUnits },
+      { label: 'Private units', value: s.avgPrivateUnits },
+      { label: 'Group units', value: s.avgGroupUnits },
+      { label: '$ / private lesson', value: money(s.avgPricePerPrivateUnit) },
+      { label: '$ / group lesson', value: money(s.avgPricePerGroupUnit) },
     ],
     paid: s,
   }))

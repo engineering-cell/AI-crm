@@ -19,7 +19,9 @@ import LeadsDialog from '@/app/leads/components/LeadsDialog'
 import LeadCommunicationDialog from '@/components/leads/LeadCommunicationDialog'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import api from '@/lib/api'
-import { cn, formatDate } from '@/lib/utils'
+import { cn } from '@/lib/utils'
+import { getStudioTimezone } from '@/lib/studioTimezone'
+import { compareToTodayInTz, formatDayKey, pickTimezone } from '@/lib/location-time'
 import { useLeadStages, formatLeadStageLabel, getLeadStageColor } from '@/lib/lead-stages'
 import StatusColorBadge from '@/components/shared/StatusColorBadge'
 
@@ -28,35 +30,32 @@ const ROWS_PER_PAGE = 10
 // Remembers tab/search/filters/page across back/forward navigation.
 const CALLBACKS_LIST_STATE_KEY = 'callbacks-list-state'
 
-function todayDateStr() {
-  const d = new Date()
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
-  return d.toISOString().slice(0, 10)
+// Day/status of a row's callback, decided in the timezone of the contact's LOCATION
+// (never the browser's or UTC). Backend callbackDayKey/callbackStatus win when present.
+export function resolveCallback(row, tz) {
+  if (!row?.callbackDate && !row?.callbackDayKey) return null
+  const zone = pickTimezone(row.locationTimezone, tz, getStudioTimezone())
+  const computed = compareToTodayInTz(row.callbackDayKey || row.callbackDate, zone)
+  if (!computed) return null
+  const status = ['overdue', 'today', 'upcoming'].includes(row.callbackStatus) ? row.callbackStatus : computed.status
+  return { ...computed, status }
 }
 
-function daysUntil(dateStr) {
-  if (!dateStr) return null
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const target = new Date(dateStr)
-  target.setHours(0, 0, 0, 0)
-  return Math.round((target - today) / (1000 * 60 * 60 * 24))
-}
-
-function CallbackBadge({ date }) {
-  const diff = daysUntil(date)
-  if (diff === null) return <span className="text-sm text-muted-foreground">—</span>
+export function CallbackBadge({ info }) {
+  if (!info) return <span className="text-sm text-muted-foreground">—</span>
+  const { dayKey, diffDays, status } = info
+  const date = formatDayKey(dayKey)
   let style = 'bg-muted text-foreground'
-  let label = formatDate(date)
-  if (diff < 0) {
+  let label = date
+  if (status === 'overdue') {
     style = 'bg-rose-100 text-rose-800'
-    label = `${formatDate(date)} · Overdue`
-  } else if (diff === 0) {
+    label = `${date} · Overdue`
+  } else if (status === 'today') {
     style = 'bg-warning/10 text-warning'
-    label = `${formatDate(date)} · Today`
-  } else if (diff <= 3) {
+    label = `${date} · Today`
+  } else if (diffDays <= 3) {
     style = 'bg-warning/10 text-warning'
-    label = `${formatDate(date)} · in ${diff}d`
+    label = `${date} · in ${diffDays}d`
   }
   return (
     <span className={cn('inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium', style)}>
@@ -185,7 +184,8 @@ export default function CallbackReportPage() {
     try {
       const path = tab === 'leads' ? '/api/lead' : '/api/customer'
       const base = [{ field: 'callbackDate', operator: 'exists', value: true }]
-      const today = todayDateStr()
+      // 'today' is resolved by the backend per contact, in each contact's location timezone.
+      const today = 'today'
 
       const [totalRes, overdueRes, todayRes, upcomingRes] = await Promise.all([
         api.get(`${path}?${buildParams(base, { limit: 1 })}`),
@@ -215,6 +215,18 @@ export default function CallbackReportPage() {
   }, [fetchSummary])
 
   const totalPages = Math.max(1, Math.ceil(total / ROWS_PER_PAGE))
+
+  // Timezone of a row's location: backend value, else the location list (by id or name).
+  const rowTimezone = (row) => {
+    if (row.locationTimezone) return row.locationTimezone
+    const raw = Array.isArray(row.locationID) ? row.locationID[0] : row.locationID
+    const id = raw ? String(raw?._id ?? raw) : null
+    const loc =
+      (id && locations.find((l) => String(l._id) === id)) ||
+      (typeof row.location === 'string' && locations.find((l) => l.name === row.location)) ||
+      null
+    return loc?.timezone || null
+  }
 
   const locationName = (raw) => {
     const ids = Array.isArray(raw)
@@ -446,8 +458,12 @@ export default function CallbackReportPage() {
                           <button
                             key={channel}
                             type="button"
-                            onClick={() => setCommunication({ lead: row, channel, contactType: tab === 'leads' ? 'Lead' : 'Customer' })}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setCommunication({ lead: row, channel, contactType: tab === 'leads' ? 'Lead' : 'Customer' })
+                            }}
                             title={`Open ${label}`}
+                            aria-label={`Open ${label} for ${row.name || 'contact'}`}
                             className="flex items-center gap-1 rounded-md px-1.5 py-1 transition-colors hover:bg-[var(--studio-primary)]/10 hover:text-[var(--studio-primary)]"
                           >
                             <Icon className="h-3.5 w-3.5" />
@@ -457,7 +473,7 @@ export default function CallbackReportPage() {
                       </div>
                     </TableCell>
                     <TableCell className="py-3 px-4">
-                      <CallbackBadge date={row.callbackDate} />
+                      <CallbackBadge info={resolveCallback(row, rowTimezone(row))} />
                     </TableCell>
                   </TableRow>
                 ))

@@ -78,6 +78,7 @@ import {
   formatStudioTime,
 } from "@/lib/studioLocalDate";
 import { getStudioTimezone } from "@/lib/studioTimezone";
+import { callbackInputValue, formatDayKey, isCallbackOverdue } from "@/lib/location-time";
 import { fetchWalletBalance } from "@/lib/wallet";
 import { useToast } from "@/components/ui/toast";
 import { getInitials, formatDate, formatDateTime, roundSessions } from "@/lib/utils";
@@ -475,7 +476,7 @@ function ProfileTab({ customer, locations, onUpdated }) {
   // so Customers gets the same "update the follow-up reminder in one click"
   // UX Leads already has, instead of requiring the whole profile form.
   const [callbackDateDraft, setCallbackDateDraft] = useState(
-    customer.callbackDate ? String(customer.callbackDate).slice(0, 10) : "",
+    customer.callbackDate ? callbackInputValue(customer) : "",
   );
   const [savingCallbackDate, setSavingCallbackDate] = useState(false);
   const [customerEvents, setCustomerEvents] = useState([]);
@@ -489,7 +490,7 @@ function ProfileTab({ customer, locations, onUpdated }) {
 
   useEffect(() => {
     setCallbackDateDraft(
-      customer.callbackDate ? String(customer.callbackDate).slice(0, 10) : "",
+      customer.callbackDate ? callbackInputValue(customer) : "",
     );
   }, [customer?._id, customer?.callbackDate]);
 
@@ -547,7 +548,7 @@ function ProfileTab({ customer, locations, onUpdated }) {
         : "",
       gender: customer.gender || "",
       callbackDate: customer.callbackDate
-        ? String(customer.callbackDate).slice(0, 10)
+        ? callbackInputValue(customer)
         : "",
       lifecycleStatus: customer.lifecycleStatus || "active",
       address: {
@@ -940,7 +941,7 @@ function ProfileTab({ customer, locations, onUpdated }) {
                           savingCallbackDate ||
                           callbackDateDraft ===
                             (customer.callbackDate
-                              ? String(customer.callbackDate).slice(0, 10)
+                              ? callbackInputValue(customer)
                               : "")
                         }
                         className="h-8 shrink-0 px-2.5 text-[12px]"
@@ -7939,12 +7940,12 @@ function OverviewSection({ customer, locations, summary, onOpen, onUpdated }) {
   // mirrors saveCallbackDate() in ProfileTab so this and the full profile
   // form never drift out of sync.
   const [callbackDateDraft, setCallbackDateDraft] = useState(
-    customer.callbackDate ? String(customer.callbackDate).slice(0, 10) : "",
+    customer.callbackDate ? callbackInputValue(customer) : "",
   );
   const [savingCallbackDate, setSavingCallbackDate] = useState(false);
   useEffect(() => {
     setCallbackDateDraft(
-      customer.callbackDate ? String(customer.callbackDate).slice(0, 10) : "",
+      customer.callbackDate ? callbackInputValue(customer) : "",
     );
   }, [customer?._id, customer?.callbackDate]);
   async function saveCallbackDate() {
@@ -7961,8 +7962,7 @@ function OverviewSection({ customer, locations, summary, onOpen, onUpdated }) {
     }
     setSavingCallbackDate(false);
   }
-  const callbackOverdue =
-    customer.callbackDate && new Date(customer.callbackDate).getTime() <= now;
+  const callbackOverdue = isCallbackOverdue(customer, getStudioTimezone());
 
   // Outstanding money, broken down by what it's owed against — the same
   // derivation the enrollment cards use, so the two never disagree.
@@ -8197,7 +8197,7 @@ function OverviewSection({ customer, locations, summary, onOpen, onUpdated }) {
               <span
                 className={`text-[15px] font-semibold ${callbackOverdue ? "text-warning" : "text-foreground"}`}
               >
-                {customer.callbackDate ? formatDate(customer.callbackDate) : "Not set"}
+                {customer.callbackDate ? formatDayKey(callbackInputValue(customer)) : "Not set"}
               </span>
               <div className="ml-auto flex items-center gap-1.5">
                 <input
@@ -8215,7 +8215,7 @@ function OverviewSection({ customer, locations, summary, onOpen, onUpdated }) {
                     savingCallbackDate ||
                     callbackDateDraft ===
                       (customer.callbackDate
-                        ? String(customer.callbackDate).slice(0, 10)
+                        ? callbackInputValue(customer)
                         : "")
                   }
                   className="h-8 shrink-0 px-2.5 text-[12px]"

@@ -15,6 +15,8 @@ import {
   X,
 } from 'lucide-react'
 import MainLayout from '@/components/layout/MainLayout'
+import { getStudioTimezone } from '@/lib/studioTimezone'
+import { diffDayKeys, formatDayKey, pickTimezone, todayKeyInTz } from '@/lib/location-time'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -116,6 +118,10 @@ function groupByDueDate(items) {
     const due = task.dueDate ? new Date(task.dueDate) : null
     if (task.isOverdue) {
       buckets[0].items.push(task)
+    } else if (task.dueDayKey) {
+      // Callback: bucket by calendar day in the contact's location timezone.
+      const diff = diffDayKeys(todayKeyInTz(pickTimezone(task.dueTimezone, getStudioTimezone())), task.dueDayKey)
+      buckets[diff <= 0 ? 1 : diff === 1 ? 2 : diff < 7 ? 3 : 4].items.push(task)
     } else if (!due) {
       buckets[4].items.push(task)
     } else if (due < startOfTomorrow) {
@@ -146,7 +152,7 @@ function TaskRow({ task }) {
             {task.isOverdue ? 'Overdue' : KIND_LABEL[task.kind] || task.kind}
           </Badge>
         </div>
-        <p className="text-xs text-muted-foreground">Due: {formatDate(task.dueDate)}</p>
+        <p className="text-xs text-muted-foreground">Due: {task.dueDayKey ? formatDayKey(task.dueDayKey) : formatDate(task.dueDate)}</p>
         {(task.assignee || task.relatedName) && (
           <p className="text-xs text-muted-foreground/80 mt-0.5">
             {task.assignee && `Assigned to: ${task.assignee}`}

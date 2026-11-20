@@ -62,6 +62,7 @@ import {
 } from '@/lib/customer-lifecycle'
 import { useCustomerLifecycleStatuses } from '@/lib/use-customer-lifecycle'
 import StatusColorBadge from '@/components/shared/StatusColorBadge'
+import { callbackInputValue } from '@/lib/location-time'
 
 const CUSTOMER_CSV_FIELDS = [
   { key: 'name', header: 'name', sample: 'Jane Smith' },
@@ -158,7 +159,7 @@ function CustomerFormDialog({ open, onClose, onSaved, initial }) {
                 : [],
             dateOfBirth: initial.dateOfBirth ? String(initial.dateOfBirth).slice(0, 10) : '',
             gender: initial.gender || '',
-            callbackDate: initial.callbackDate ? String(initial.callbackDate).slice(0, 10) : '',
+            callbackDate: initial.callbackDate ? callbackInputValue(initial) : '',
             lifecycleStatus: initial.lifecycleStatus || 'active',
             address: {
               street: initial.address?.street || '',

@@ -26,6 +26,7 @@ import {
 } from "@/lib/clover";
 import { PAYMENT_METHODS_WITH_SAVED_CARD } from "@/lib/paymentMethods";
 import { dateInputToISO, todayDateInput } from "@/lib/studioLocalDate";
+import { SHORTFALL_METHODS_WITH_TERMINAL } from "@/lib/paymentMethods";
 import WalletShortfallField, {
   walletPaymentFields,
 } from "@/components/payments/WalletShortfallField";
@@ -318,7 +319,7 @@ export default function PayInstallmentDialog({
           </FormField>
 
           <TerminalDeviceField
-            method={method}
+            method={paymentFields.method}
             locationID={locationID}
             deviceID={deviceID}
             onDeviceChange={setDeviceID}
@@ -341,6 +342,7 @@ export default function PayInstallmentDialog({
             amountDue={Number(amount) || 0}
             shortfallMethod={shortfallMethod}
             onShortfallMethodChange={setShortfallMethod}
+            methods={SHORTFALL_METHODS_WITH_TERMINAL}
           />
           {cloverNotConnected && (
             <p className="text-[12px] text-muted-foreground">

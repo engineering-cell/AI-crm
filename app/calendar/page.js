@@ -2044,6 +2044,68 @@ function deriveTutorsFromEvents(events, passedTutors) {
   return Object.values(seen);
 }
 
+/**
+ * An all-day event (a teacher marked out for the day) fills its whole column, so the day
+ * reads as unavailable instead of as a small chip in the all-day row.
+ *
+ * `interactive` is for a column that belongs to that one teacher (the day view): the
+ * whole column is theirs and nothing can be booked in it, so clicking it opens the event
+ * rather than a new booking. The week view's columns are days shared by every teacher, so
+ * there it only shades and labels — slots stay clickable for the other teachers.
+ * It sits below timed events (z-index 1), so a lesson booked before the to-do stays visible.
+ */
+function AllDayColumnBlock({ event, height, interactive = false, showTeacher = false, stackIndex = 0, onEventClick }) {
+  const accent = event.extendedProps?.color || "var(--studio-primary)";
+  const hatch = `repeating-linear-gradient(45deg, color-mix(in srgb, ${accent} 16%, transparent) 0, color-mix(in srgb, ${accent} 16%, transparent) 6px, transparent 6px, transparent 14px)`;
+  const teacher = event.extendedProps?.tutorName;
+  return (
+    <div
+      {...(interactive ? { "data-event": "true" } : {})}
+      onClick={
+        interactive
+          ? (e) => {
+              e.stopPropagation();
+              onEventClick?.(event.extendedProps?.raw);
+            }
+          : undefined
+      }
+      onMouseEnter={interactive ? (e) => showEventTooltip(e, event.extendedProps || {}) : undefined}
+      onMouseMove={interactive ? (e) => positionTooltip(e) : undefined}
+      onMouseLeave={interactive ? () => hideEventTooltip() : undefined}
+      className={`absolute inset-x-0 top-0 ${interactive ? "cursor-pointer" : "pointer-events-none"}`}
+      style={{
+        height,
+        zIndex: 1,
+        backgroundColor: `color-mix(in srgb, ${accent} 9%, transparent)`,
+        backgroundImage: hatch,
+        borderLeft: `3px solid ${accent}`,
+        borderRight: `1px dashed color-mix(in srgb, ${accent} 40%, transparent)`,
+      }}
+    >
+      <div
+        className={`sticky mx-1.5 flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-semibold shadow-sm ${interactive ? "" : "pointer-events-auto cursor-pointer"}`}
+        style={{
+          top: 8 + stackIndex * 26,
+          marginTop: 8,
+          backgroundColor: `color-mix(in srgb, ${accent} 22%, hsl(var(--card)))`,
+          color: accent,
+        }}
+        onClick={
+          interactive
+            ? undefined
+            : (e) => {
+                e.stopPropagation();
+                onEventClick?.(event.extendedProps?.raw);
+              }
+        }
+      >
+        <span className="truncate" title={`All day · ${event.title}`}>{event.title}</span>
+        {showTeacher && teacher ? <span className="truncate opacity-80">· {teacher}</span> : null}
+      </div>
+    </div>
+  );
+}
+
 function TutorDayCalendar({
   visibleStartMins,
   visibleEndHour,
@@ -2164,6 +2226,7 @@ function TutorDayCalendar({
   const focusDateLabel = focusDate.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 
   const headerScrollRef = useRef(null);
+  const allDayScrollRef = useRef(null);
   const bodyScrollRef = useRef(null);
   const draggedColRef = useRef(null);
   const [dragOverCol, setDragOverCol] = useState(null);
@@ -2180,8 +2243,9 @@ function TutorDayCalendar({
   const colWidth = undefined;
 
   function syncHeaderScroll() {
-    if (headerScrollRef.current && bodyScrollRef.current) {
-      headerScrollRef.current.scrollLeft = bodyScrollRef.current.scrollLeft;
+    if (bodyScrollRef.current) {
+      if (headerScrollRef.current) headerScrollRef.current.scrollLeft = bodyScrollRef.current.scrollLeft;
+      if (allDayScrollRef.current) allDayScrollRef.current.scrollLeft = bodyScrollRef.current.scrollLeft;
     }
   }
 
@@ -2270,34 +2334,42 @@ function TutorDayCalendar({
           <div className="w-[86px] shrink-0 border-r border-border px-2 py-2 text-[10px] font-medium text-muted-foreground">
             All day
           </div>
-          {effectiveTutors.map((tutor, idx) => (
-            <div
-              key={`allday-${tutor.key}`}
-              className="flex-1 px-1.5 py-1"
-              style={{
-                borderRight:
-                  idx < effectiveTutors.length - 1
-                    ? "1px solid hsl(var(--border))"
-                    : "none",
-              }}
-            >
-              {(byTutorAllDay[tutor.key] || []).slice(0, 1).map((event) => (
-                <div
-                  key={event.id}
-                  className="flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold"
-                  style={{
-                    backgroundColor: `color-mix(in srgb, ${event.extendedProps?.color || "var(--studio-primary)"} 28%, hsl(var(--card)))`,
-                    borderLeft: `3px solid ${event.extendedProps?.color || "var(--studio-primary)"}`,
-                    color:
-                      event.extendedProps?.color || "var(--studio-primary)",
-                  }}
-                >
-                  <span className="truncate">{event.title}</span>
-                  <TypeBadge type={event.extendedProps?.eventType} />
-                </div>
-              ))}
+          {/* Same width rules and scroll position as the header and the grid below, so these
+              columns stay lined up under each teacher when there are too many to fit. */}
+          <div ref={allDayScrollRef} className="flex-1 overflow-x-hidden">
+            <div className="flex h-full" style={{ minWidth: effectiveTutors.length * MIN_COL_WIDTH }}>
+            {effectiveTutors.map((tutor, idx) => (
+              <div
+                key={`allday-${tutor.key}`}
+                className={`px-1.5 py-1 ${colClass}`}
+                style={{
+                  minWidth: MIN_COL_WIDTH,
+                  ...(colWidth && { width: colWidth }),
+                  borderRight:
+                    idx < effectiveTutors.length - 1
+                      ? "1px solid hsl(var(--border))"
+                      : "none",
+                }}
+              >
+                {(byTutorAllDay[tutor.key] || []).slice(0, 1).map((event) => (
+                  <div
+                    key={event.id}
+                    className="flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold"
+                    style={{
+                      backgroundColor: `color-mix(in srgb, ${event.extendedProps?.color || "var(--studio-primary)"} 28%, hsl(var(--card)))`,
+                      borderLeft: `3px solid ${event.extendedProps?.color || "var(--studio-primary)"}`,
+                      color:
+                        event.extendedProps?.color || "var(--studio-primary)",
+                    }}
+                  >
+                    <span className="truncate">{event.title}</span>
+                    <TypeBadge type={event.extendedProps?.eventType} />
+                  </div>
+                ))}
+              </div>
+            ))}
             </div>
-          ))}
+          </div>
         </div>
       </div>
 
@@ -2518,6 +2590,16 @@ function TutorDayCalendar({
                   </div>
                 );
               })}
+
+              {(byTutorAllDay[tutor.key] || []).slice(0, 1).map((event) => (
+                <AllDayColumnBlock
+                  key={`allday-col-${event.id}`}
+                  event={event}
+                  height={paddedDayHeight}
+                  interactive
+                  onEventClick={onEventClick}
+                />
+              ))}
             </div>
           ))}
 
@@ -2599,6 +2681,17 @@ function TutorWeekCalendar({
     }),
     [gridPadTop, gridStartMins, customSlotMins, slotRowHeightPx],
   );
+
+  // All-day events (a teacher out for the day) shade their whole day column.
+  const byDayAllDay = useMemo(() => {
+    const map = {};
+    weekDays.forEach((day) => {
+      map[formatLocalDateKey(day)] = events.filter(
+        (event) => event.allDay && isSameDate(new Date(event.start), day),
+      );
+    });
+    return map;
+  }, [events, weekDays]);
 
   const byDayTimed = useMemo(() => {
     const map = {};
@@ -2768,6 +2861,17 @@ function TutorWeekCalendar({
                   />
                 );
               })}
+
+              {(byDayAllDay[key] || []).slice(0, 3).map((event, i) => (
+                <AllDayColumnBlock
+                  key={`allday-col-${event.id}`}
+                  event={event}
+                  height={paddedWeekHeight}
+                  showTeacher
+                  stackIndex={i}
+                  onEventClick={onEventClick}
+                />
+              ))}
 
               {(byDayTimed[key]?.visible || []).map((event) => (
                 <TimedCalendarEventCard

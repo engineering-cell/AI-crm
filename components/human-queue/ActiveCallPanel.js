@@ -68,9 +68,18 @@ export default function ActiveCallPanel({
     onMinimizedChange?.(value)
   }
   const [muted, setMuted] = useState(false)
-  const [callerOnHold, setCallerOnHold] = useState(false)
+  const callerOnHold = callStatus === 'on_hold'
 
   const isConnected = callStatus === 'connected' || callStatus === 'on_hold'
+  // A callback dial can be tucked away while it is still connecting.
+  // Closing the panel must not hang that call up.
+  const dismissPanel = () => {
+    if (mode === 'outbound' || isConnected) {
+      setMinimized(true)
+      return
+    }
+    onClose?.()
+  }
   const { formatted: callDuration } = useCallTimer(isConnected, call?.inProgressAt || call?.claimedAt || call?.initiatedAt)
   useEffect(() => {
     if (!connection) return undefined
@@ -89,10 +98,8 @@ export default function ActiveCallPanel({
   }
 
   const handleToggleHold = async () => {
-    const next = !callerOnHold
     try {
-      await onHoldChange?.(next)
-      setCallerOnHold(next)
+      await onHoldChange?.(!callerOnHold)
     } catch {
       // parent shows toast
     }
@@ -142,7 +149,7 @@ export default function ActiveCallPanel({
     <div className="fixed inset-0 flex items-end justify-center p-4 sm:items-center sm:p-6" style={{ zIndex: layerZIndex }}>
       <div
         className="absolute inset-0 bg-background/70 backdrop-blur-sm"
-        onClick={isConnected ? undefined : onClose}
+        onClick={dismissPanel}
       />
 
       <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-3xl border border-border bg-card shadow-2xl animate-scale-in">
@@ -180,9 +187,9 @@ export default function ActiveCallPanel({
               </button>
               <button
                 type="button"
-                onClick={isConnected ? () => setMinimized(true) : onClose}
+                onClick={dismissPanel}
                 className="rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white"
-                title={isConnected ? 'Minimize' : 'Close'}
+                title={mode === 'outbound' || isConnected ? 'Minimize' : 'Close'}
               >
                 <X className="h-4 w-4" />
               </button>

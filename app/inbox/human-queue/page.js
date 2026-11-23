@@ -1,7 +1,6 @@
 'use client'
 
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   ArrowRightLeft,
@@ -26,14 +25,21 @@ import { toStudioLocalDate } from '@/lib/studioLocalDate'
 import { getStudioTimezone } from '@/lib/studioTimezone'
 import GlobalLoader from '@/components/shared/GlobalLoader'
 import api from '@/lib/api'
-import { isPersistedCallId, nextOutboundPanelStatus } from '@/lib/outboundCallStatus'
+import { isPersistedCallId } from '@/lib/outboundCallStatus'
+import {
+  clearLiveOutboundCall,
+  hasLiveOutboundCall,
+  isLiveOutboundSession,
+  patchLiveOutboundCall,
+  startLiveOutboundCall,
+  useLiveOutboundCall,
+} from '@/lib/liveOutboundCallStore'
 import { useToast } from '@/components/ui/toast'
 import { getCurrentUser } from '@/lib/auth'
 import { canManageCallCenter, hasPermission } from '@/lib/permissions'
 import {
   disconnectConnection,
   joinConferenceCall,
-  subscribeToConnectionEvents,
 } from '@/lib/twilioVoiceClient'
 import {
   beginQueueAnswer,
@@ -47,9 +53,9 @@ import {
   startLiveQueueCall,
   useLiveQueueCall,
 } from '@/lib/liveQueueCallStore'
-import ActiveCallPanel from '@/components/human-queue/ActiveCallPanel'
 import ResolvedCallDetail from '@/components/human-queue/ResolvedCallDetail'
 import CallbackContactDialog from '@/components/human-queue/CallbackContactDialog'
+import ResolvedLeadSidebar from '@/components/human-queue/ResolvedLeadSidebar'
 
 const CALLBACK_CHANNEL_META = {
   call: {
@@ -394,9 +400,8 @@ function HumanQueuePageContent() {
   const liveQueue = useLiveQueueCall()
   const activeCall = liveQueue.call
   const activeConnection = liveQueue.connection
-  const [callbackOutboundCall, setCallbackOutboundCall] = useState(null)
-  const [callbackOutboundConnection, setCallbackOutboundConnection] = useState(null)
-  const [callbackOutboundStatus, setCallbackOutboundStatus] = useState('connecting')
+  const callbackOutbound = useLiveOutboundCall()
+  const callbackOutboundCall = callbackOutbound.call
 
   const canViewSettings = hasPermission('inbox', 'QueueSettings', 'read')
   const canEditSettings = hasPermission('inbox', 'QueueSettings', 'write')
@@ -410,17 +415,6 @@ function HumanQueuePageContent() {
   }, [activeTab])
 
   const answerParamHandledRef = useRef(null)
-  const endingCallbackOutboundRef = useRef(false)
-  const endCallbackOutboundRef = useRef(null)
-  const callbackOutboundConnectionRef = useRef(null)
-  const callbackOutboundCallRef = useRef(null)
-  const callbackOutboundStatusRef = useRef('connecting')
-  const callbackAttemptRef = useRef(0)
-  const setOutboundStatus = useCallback((next) => {
-    callbackOutboundStatusRef.current = next
-    setCallbackOutboundStatus(next)
-  }, [])
-
   // -- Callbacks tab state --
   const [callbacks, setCallbacks] = useState([])
   const [callbacksLoading, setCallbacksLoading] = useState(false)
@@ -435,6 +429,7 @@ function HumanQueuePageContent() {
   })
   const [callbackFilter, setCallbackFilter] = useState('pending')
   const [selectedCallback, setSelectedCallback] = useState(null)
+  const [callbackProfile, setCallbackProfile] = useState(null)
   const [callbackPage, setCallbackPage] = useState(1)
   const [callbackTotal, setCallbackTotal] = useState(0)
   const callbackFetchGenRef = useRef(0)
@@ -778,87 +773,6 @@ function HumanQueuePageContent() {
     }
   }
 
-  useEffect(() => { callbackOutboundConnectionRef.current = callbackOutboundConnection }, [callbackOutboundConnection])
-  useEffect(() => { callbackOutboundCallRef.current = callbackOutboundCall }, [callbackOutboundCall])
-  useEffect(() => { callbackOutboundStatusRef.current = callbackOutboundStatus }, [callbackOutboundStatus])
-
-  useEffect(() => {
-    return () => {
-      const call = callbackOutboundCallRef.current
-      const callId = call?.id || call?._id
-      const connection = callbackOutboundConnectionRef.current
-      if (!isPersistedCallId(callId) && !connection) return
-      endingCallbackOutboundRef.current = true
-      callbackAttemptRef.current += 1
-      disconnectConnection(connection)
-      if (isPersistedCallId(callId)) api.post(`/api/human-call/${callId}/end`).catch(() => {})
-    }
-  }, [])
-
-  const clearCallbackOutboundUi = useCallback(() => {
-    setCallbackOutboundCall(null)
-    setCallbackOutboundConnection(null)
-    setOutboundStatus('connecting')
-  }, [])
-
-  const handleEndCallbackOutbound = useCallback(async (opts = {}) => {
-    const remoteHangup = Boolean(opts && opts.remoteHangup === true)
-    const silent = Boolean(opts && opts.silent === true)
-    if (endingCallbackOutboundRef.current) return
-    endingCallbackOutboundRef.current = true
-    callbackAttemptRef.current += 1
-    const callId = callbackOutboundCallRef.current?.id || callbackOutboundCall?.id || callbackOutboundCall?._id
-    try {
-      disconnectConnection(callbackOutboundConnectionRef.current || callbackOutboundConnection)
-      if (isPersistedCallId(callId)) await api.post(`/api/human-call/${callId}/end`)
-    } catch (error) {
-      console.error(error)
-    } finally {
-      clearCallbackOutboundUi()
-      if (!silent) {
-        toast.info({
-          title: 'Call ended',
-          message: remoteHangup ? 'The other party disconnected.' : 'You left the call.',
-        })
-      }
-      setTimeout(() => { endingCallbackOutboundRef.current = false }, 500)
-    }
-  }, [callbackOutboundCall, callbackOutboundConnection, clearCallbackOutboundUi, toast])
-
-  useEffect(() => {
-    endCallbackOutboundRef.current = handleEndCallbackOutbound
-  }, [handleEndCallbackOutbound])
-
-  useEffect(() => {
-    const callId = callbackOutboundCall?.id || callbackOutboundCall?._id
-    if (!callId || !isPersistedCallId(callId)) return undefined
-    let cancelled = false
-    const poll = async () => {
-      try {
-        if (endingCallbackOutboundRef.current) return
-        const res = await api.get(`/api/human-call/${callId}`)
-        if (cancelled || endingCallbackOutboundRef.current || !res.success || !res.data) return
-        const status = String(res.data.status || '').toLowerCase()
-        const next = nextOutboundPanelStatus(status, callbackOutboundStatusRef.current)
-        if (next === 'ended') {
-          endCallbackOutboundRef.current?.({ remoteHangup: true })
-          return
-        }
-        if (next !== callbackOutboundStatusRef.current) {
-          setOutboundStatus(next)
-        }
-      } catch (error) {
-        console.error(error)
-      }
-    }
-    const interval = setInterval(poll, 1000)
-    poll()
-    return () => {
-      cancelled = true
-      clearInterval(interval)
-    }
-  }, [callbackOutboundCall?.id, callbackOutboundCall?._id])
-
   const placeCallbackCall = useCallback(async ({
     leadId,
     phone,
@@ -868,7 +782,7 @@ function HumanQueuePageContent() {
     reason,
     aiSummary,
   }) => {
-    if (hasLiveQueueCall() || callbackOutboundCall) {
+    if (hasLiveQueueCall() || hasLiveOutboundCall()) {
       toast.error({ title: 'Already on a call', message: 'Finish your current call first.' })
       return false
     }
@@ -876,26 +790,26 @@ function HumanQueuePageContent() {
       toast.error({ title: 'Missing phone', message: 'This lead has no phone number.' })
       return false
     }
-    endingCallbackOutboundRef.current = false
-    const attempt = ++callbackAttemptRef.current
     const pendingId = `pending-${callbackId || Date.now()}`
-    setCallbackOutboundCall({
-      id: pendingId,
-      _id: pendingId,
-      callbackId,
-      name,
-      leadName: name,
-      callerName: name,
-      phone,
-      phoneNumber: phone,
-      callerPhone: phone,
-      escalationReason: reason || '',
-      lastMessage: reason || '',
-      aiSummary: aiSummary || '',
-      initiatedAt: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
+    const dialSession = startLiveOutboundCall({
+      canManage: canManageCalls,
+      call: {
+        id: pendingId,
+        _id: pendingId,
+        callbackId,
+        name,
+        leadName: name,
+        callerName: name,
+        phone,
+        phoneNumber: phone,
+        callerPhone: phone,
+        escalationReason: reason || '',
+        lastMessage: reason || '',
+        aiSummary: aiSummary || '',
+        initiatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      },
     })
-    setOutboundStatus('connecting')
     setSelectedCallback(null)
     let callHistoryId = null
     try {
@@ -908,7 +822,7 @@ function HumanQueuePageContent() {
         },
       })
       if (!result.success) throw new Error(result.error || 'Could not place the call.')
-      if (attempt !== callbackAttemptRef.current) {
+      if (!isLiveOutboundSession(dialSession)) {
         const cancelledId = result.data?.callHistoryId || result.data?.call?._id
         if (isPersistedCallId(cancelledId)) api.post(`/api/human-call/${cancelledId}/end`).catch(() => {})
         return false
@@ -917,26 +831,26 @@ function HumanQueuePageContent() {
       const conferenceName = result.data?.conferenceName
       callHistoryId = result.data?.callHistoryId || result.data?.call?._id
       const fromNumber = result.data?.from || ''
-      const session = {
-        id: callHistoryId,
-        _id: callHistoryId,
-        callbackId,
-        name,
-        leadName: name,
-        callerName: name,
-        phone,
-        phoneNumber: phone,
-        callerPhone: phone,
-        fromNumber,
-        conferenceName,
-        escalationReason: reason || '',
-        lastMessage: reason || '',
-        aiSummary: aiSummary || '',
-        initiatedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-      }
-      setCallbackOutboundCall(session)
-      setOutboundStatus('connecting')
+      patchLiveOutboundCall({
+        call: {
+          id: callHistoryId,
+          _id: callHistoryId,
+          callbackId,
+          name,
+          leadName: name,
+          callerName: name,
+          phone,
+          phoneNumber: phone,
+          callerPhone: phone,
+          fromNumber,
+          conferenceName,
+          escalationReason: reason || '',
+          lastMessage: reason || '',
+          aiSummary: aiSummary || '',
+          initiatedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+      })
 
       if (conferenceName) {
         const connection = await joinConferenceCall({
@@ -944,31 +858,12 @@ function HumanQueuePageContent() {
           conferenceName,
           callHistoryId,
         })
-        if (attempt !== callbackAttemptRef.current) {
+        if (!isLiveOutboundSession(dialSession)) {
           disconnectConnection(connection)
           if (isPersistedCallId(callHistoryId)) api.post(`/api/human-call/${callHistoryId}/end`).catch(() => {})
           return false
         }
-        setCallbackOutboundConnection(connection)
-        subscribeToConnectionEvents(connection, {
-          accept: () => {},
-          // A browser-leg blip must not unmount the popup. The status poll
-          // closes it once the customer call is actually finished.
-          disconnect: () => {
-            if (endingCallbackOutboundRef.current) return
-            setCallbackOutboundConnection(null)
-          },
-          cancel: () => {
-            if (endingCallbackOutboundRef.current) return
-            setCallbackOutboundConnection(null)
-          },
-          error: () => {
-            toast.error({
-              title: 'Call audio error',
-              message: 'Browser call connection failed. Check microphone permissions.',
-            })
-          },
-        })
+        patchLiveOutboundCall({ connection })
       }
 
       if (callbackId) {
@@ -987,7 +882,7 @@ function HumanQueuePageContent() {
       return true
     } catch (error) {
       console.error(error)
-      if (attempt !== callbackAttemptRef.current) return false
+      if (!isLiveOutboundSession(dialSession)) return false
       if (callHistoryId) {
         toast.error({
           title: 'Call audio failed',
@@ -995,26 +890,11 @@ function HumanQueuePageContent() {
         })
         return true
       }
-      clearCallbackOutboundUi()
+      clearLiveOutboundCall()
       toast.error({ title: 'Call failed', message: error.message || 'Could not place the call.' })
       return false
     }
-  }, [callbackOutboundCall, clearCallbackOutboundUi, fetchCallbacks, setOutboundStatus, toast])
-
-  const handleCallbackHold = useCallback(async (onHold) => {
-    const callId = callbackOutboundCall?.id || callbackOutboundCall?._id
-    if (!callId) return
-    const r = await api.post(`/api/human-call/${callId}/hold`, { hold: onHold })
-    if (!r.success) {
-      toast.error({ title: 'Hold failed', message: r.error || 'Could not update hold status.' })
-      throw new Error(r.error || 'Hold failed')
-    }
-    setOutboundStatus(onHold ? 'on_hold' : 'connected')
-    toast.success({
-      title: onHold ? 'Caller on hold' : 'Caller resumed',
-      message: onHold ? 'The caller is hearing hold music.' : 'You are connected again.',
-    })
-  }, [callbackOutboundCall, toast, setOutboundStatus])
+  }, [canManageCalls, fetchCallbacks, toast])
 
   // ── Queue actions ──
   const handleAnswer = async (item) => {
@@ -1217,21 +1097,7 @@ function HumanQueuePageContent() {
   return (
     <MainLayout title="Call Center" subtitle="Live voice escalations from AI agents">
       <div className="space-y-4">
-        {/* Queue live call UI is owned by LiveCallHost (Providers) so it survives navigation. */}
-        {callbackOutboundCall && typeof document !== 'undefined' && createPortal(
-          <ActiveCallPanel
-            mode="outbound"
-            layerZIndex={500}
-            call={callbackOutboundCall}
-            connection={callbackOutboundConnection}
-            callStatus={callbackOutboundStatus}
-            canManage={canManageCalls}
-            onEndCall={() => handleEndCallbackOutbound()}
-            onHoldChange={handleCallbackHold}
-            onClose={() => handleEndCallbackOutbound()}
-          />,
-          document.body,
-        )}
+        {/* Live calls, including a callback dial, stay in LiveCallHost so a tab change does not hang up. */}
 
         {/* ── Top bar: tabs + controls ── */}
         <section className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-3">
@@ -1377,7 +1243,10 @@ function HumanQueuePageContent() {
                         <button
                           key={cbId}
                           type="button"
-                          onClick={() => setSelectedCallback(cb)}
+                          onClick={(e) => {
+                            if (e.target.closest('[data-open-profile]')) return
+                            setSelectedCallback(cb)
+                          }}
                           className="w-full rounded-xl border border-border bg-background p-4 text-left transition-colors hover:border-[var(--studio-primary)]/40 hover:bg-muted/30"
                         >
                           <div className="flex items-start justify-between gap-3">
@@ -1389,9 +1258,26 @@ function HumanQueuePageContent() {
                               </Avatar>
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2 min-w-0">
-                                  <p className="text-sm font-medium text-foreground truncate">
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    data-open-profile="true"
+                                    title="Open lead profile"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setCallbackProfile(cb)
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault()
+                                        e.stopPropagation()
+                                        setCallbackProfile(cb)
+                                      }
+                                    }}
+                                    className="truncate text-sm font-medium text-foreground hover:text-[var(--studio-primary)] hover:underline underline-offset-2"
+                                  >
                                     {cb.leadName || cb.callerName || 'Unknown'}
-                                  </p>
+                                  </span>
                                   <span
                                     className={cn(
                                       'shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold',
@@ -1402,9 +1288,32 @@ function HumanQueuePageContent() {
                                     {channelMeta.label}
                                   </span>
                                 </div>
-                                <p className="text-xs text-muted-foreground truncate">
-                                  {cb.phone || cb.callerPhone || cb.email || cb.callerEmail || '—'}
-                                </p>
+                                {(cb.phone || cb.callerPhone) ? (
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    data-open-profile="true"
+                                    title="Open lead profile"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setCallbackProfile(cb)
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault()
+                                        e.stopPropagation()
+                                        setCallbackProfile(cb)
+                                      }
+                                    }}
+                                    className="block truncate text-xs text-muted-foreground hover:text-[var(--studio-primary)] hover:underline underline-offset-2"
+                                  >
+                                    {cb.phone || cb.callerPhone}
+                                  </span>
+                                ) : (
+                                  <p className="text-xs text-muted-foreground truncate">
+                                    {cb.email || cb.callerEmail || '—'}
+                                  </p>
+                                )}
                               </div>
                             </div>
                             <span
@@ -1545,6 +1454,15 @@ function HumanQueuePageContent() {
                 preferredChannel={selectedCallback?.channel || 'call'}
                 onUpdated={commitCallbackChange}
                 onPlaceCall={placeCallbackCall}
+              />
+              <ResolvedLeadSidebar
+                open={Boolean(callbackProfile)}
+                onClose={() => setCallbackProfile(null)}
+                profileId={callbackProfile?.id || callbackProfile?._id || null}
+                apiBase="/api/callback-requests"
+                fallbackName={callbackProfile?.leadName || callbackProfile?.callerName || 'Unknown'}
+                fallbackPhone={callbackProfile?.phone || callbackProfile?.callerPhone || ''}
+                canManage={canManageCalls}
               />
             </section>
           )

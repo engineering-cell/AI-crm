@@ -6,6 +6,16 @@ import { usePathname } from 'next/navigation'
 import api from '@/lib/api'
 import { isAuthenticated } from '@/lib/auth'
 import { useToast } from '@/components/ui/toast'
+import { isPersistedCallId, nextOutboundPanelStatus } from '@/lib/outboundCallStatus'
+import {
+  clearLiveOutboundCall,
+  getLiveOutboundCallState,
+  noteUserEndedLiveOutboundCall,
+  patchLiveOutboundCall,
+  setLiveOutboundCallMinimized,
+  takeOutboundEndSuppressed,
+  useLiveOutboundCall,
+} from '@/lib/liveOutboundCallStore'
 import {
   clearLiveQueueCall,
   getLiveQueueCallState,
@@ -30,14 +40,22 @@ const STATUS_POLL_MS = 4000
  *  - the incoming-call popup (always mounted; not tied to Call Center tabs)
  *  - the live queue call panel / minimized bar (survives navigation)
  *
- * Mount once from Providers. Outbound inbox / callback dials stay page-local.
+ * Mount once from Providers. Callback dials live here too, so leaving
+ * Call Center minimizes the call instead of hanging it up.
  */
 function dropLiveCallOnLogout() {
   const live = getLiveQueueCallState()
-  if (!live.call && !live.connection) return
-  noteUserEndedLiveQueueCall()
-  disconnectConnection(live.connection)
-  clearLiveQueueCall()
+  if (live.call || live.connection) {
+    noteUserEndedLiveQueueCall()
+    disconnectConnection(live.connection)
+    clearLiveQueueCall()
+  }
+  const outbound = getLiveOutboundCallState()
+  if (outbound.call || outbound.connection) {
+    noteUserEndedLiveOutboundCall()
+    disconnectConnection(outbound.connection)
+    clearLiveOutboundCall()
+  }
 }
 
 export default function LiveCallHost() {
@@ -62,6 +80,7 @@ export default function LiveCallHost() {
 function LiveCallHostInner() {
   const toast = useToast()
   const live = useLiveQueueCall()
+  const outbound = useLiveOutboundCall()
   const disconnectToastRef = useRef(false)
   const clearingRef = useRef(false)
   const liveRef = useRef(live)
@@ -233,6 +252,110 @@ function LiveCallHostInner() {
     clearLiveQueueCall()
   }, [])
 
+  useEffect(() => {
+    const connection = outbound.connection
+    if (!connection || !getLiveOutboundCallState().call) return undefined
+    return subscribeToConnectionEvents(connection, {
+      // A browser-leg blip must not close the panel. The status poll
+      // closes it once the customer call is actually finished.
+      disconnect: () => {
+        if (!getLiveOutboundCallState().call) return
+        patchLiveOutboundCall({ connection: null })
+      },
+      cancel: () => {
+        if (!getLiveOutboundCallState().call) return
+        patchLiveOutboundCall({ connection: null })
+      },
+      error: () => {
+        toast.error({
+          title: 'Call audio error',
+          message: 'Browser call connection failed. Check microphone permissions.',
+        })
+      },
+    })
+  }, [outbound.connection, toast])
+
+  const endOutboundCall = useCallback((opts = {}) => {
+    const remoteHangup = Boolean(opts.remoteHangup)
+    const current = getLiveOutboundCallState()
+    if (!current.call && !current.connection) return
+    noteUserEndedLiveOutboundCall()
+    const callId = current.call?.id || current.call?._id
+    disconnectConnection(current.connection)
+    clearLiveOutboundCall()
+    if (isPersistedCallId(callId)) api.post(`/api/human-call/${callId}/end`).catch(() => {})
+    toast.info({
+      title: 'Call ended',
+      message: remoteHangup ? 'The call has ended.' : 'You left the call.',
+    })
+  }, [toast])
+
+  useEffect(() => {
+    const callId = outbound.call?.id || outbound.call?._id
+    if (!callId || !isPersistedCallId(callId)) return undefined
+    let cancelled = false
+    const poll = async () => {
+      if (takeOutboundEndSuppressed() || !getLiveOutboundCallState().call) return
+      try {
+        const res = await api.get(`/api/human-call/${callId}`)
+        if (cancelled || !getLiveOutboundCallState().call || !res.success || !res.data) return
+        const next = nextOutboundPanelStatus(
+          res.data.status,
+          getLiveOutboundCallState().callStatus,
+        )
+        if (next === 'ended') {
+          endOutboundCall({ remoteHangup: true })
+          return
+        }
+        if (next !== getLiveOutboundCallState().callStatus) {
+          patchLiveOutboundCall({ callStatus: next })
+        }
+      } catch {
+        // ignore transient poll errors
+      }
+    }
+    poll()
+    const id = setInterval(poll, 1000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [outbound.call?.id, outbound.call?._id, endOutboundCall])
+
+  const handleOutboundHold = useCallback(async (onHold) => {
+    const callId = getLiveOutboundCallState().call?.id || getLiveOutboundCallState().call?._id
+    if (!callId) return
+    const r = await api.post(`/api/human-call/${callId}/hold`, { hold: onHold })
+    if (!r.success) {
+      toast.error({ title: 'Hold failed', message: r.error || 'Could not update hold status.' })
+      throw new Error(r.error || 'Hold failed')
+    }
+    patchLiveOutboundCall({ callStatus: onHold ? 'on_hold' : 'connected' })
+    toast.success({
+      title: onHold ? 'Caller on hold' : 'Caller resumed',
+      message: onHold ? 'The caller is hearing hold music.' : 'You are connected again.',
+    })
+  }, [toast])
+
+  const outboundPanel = outbound.call && typeof document !== 'undefined'
+    ? createPortal(
+      <ActiveCallPanel
+        mode="outbound"
+        layerZIndex={500}
+        call={outbound.call}
+        connection={outbound.connection}
+        callStatus={outbound.callStatus}
+        canManage={outbound.canManage}
+        minimized={outbound.minimized}
+        onMinimizedChange={setLiveOutboundCallMinimized}
+        onEndCall={() => endOutboundCall()}
+        onHoldChange={handleOutboundHold}
+        onClose={() => setLiveOutboundCallMinimized(true)}
+      />,
+      document.body,
+    )
+    : null
+
   const panel = live.call && typeof document !== 'undefined'
     ? createPortal(
       <ActiveCallPanel
@@ -260,6 +383,7 @@ function LiveCallHostInner() {
         <GlobalIncomingCallAlert />
       </Suspense>
       {panel}
+      {outboundPanel}
     </>
   )
 }

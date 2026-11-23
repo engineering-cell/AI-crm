@@ -53,13 +53,15 @@ function wallTimeInputValue(iso) {
 }
 
 /**
- * Right-hand lead profile on a resolved Call Center call.
- * Stage and callback only — the full inbox stays in the callbacks dialog.
+ * Right-hand lead profile. Used on a resolved call and on a callback row.
+ * Stage, notes, and callback — the full inbox stays in the callbacks dialog.
  */
 export default function ResolvedLeadSidebar({
   open,
   onClose,
   queueItemId,
+  profileId,
+  apiBase = '/api/human-queue',
   fallbackName = 'Unknown caller',
   fallbackPhone = '',
   canManage = false,
@@ -78,14 +80,15 @@ export default function ResolvedLeadSidebar({
   const [deletingNoteId, setDeletingNoteId] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const loadGen = useRef(0)
+  const recordId = profileId || queueItemId
 
   const loadContact = useCallback(async () => {
-    if (!queueItemId) return
+    if (!recordId) return
     const gen = ++loadGen.current
     setLoading(true)
     setLoadError(null)
     try {
-      const r = await api.get(`/api/human-queue/${encodeURIComponent(queueItemId)}/contact`)
+      const r = await api.get(`${apiBase}/${encodeURIComponent(recordId)}/contact`)
       if (gen !== loadGen.current) return
       if (!r.success) {
         setLead(null)
@@ -107,15 +110,15 @@ export default function ResolvedLeadSidebar({
     } finally {
       if (gen === loadGen.current) setLoading(false)
     }
-  }, [queueItemId])
+  }, [apiBase, recordId])
 
   useEffect(() => {
-    if (!open || !queueItemId) return
+    if (!open || !recordId) return
     loadContact()
-  }, [open, queueItemId, loadContact])
+  }, [open, recordId, loadContact])
 
   const handleSaveLeadStage = async (next) => {
-    if (!canManage || !(lead?.id || lead?._id) || !queueItemId || savingStage) return
+    if (!canManage || !(lead?.id || lead?._id) || !recordId || savingStage) return
     if (
       String(next || '').trim().toLowerCase() ===
       String(leadStage || '').trim().toLowerCase()
@@ -126,7 +129,7 @@ export default function ResolvedLeadSidebar({
     setSavingStage(next)
     setLeadStage(next)
     try {
-      const r = await api.patch(`/api/human-queue/${encodeURIComponent(queueItemId)}/lead-stage`, {
+      const r = await api.patch(`${apiBase}/${encodeURIComponent(recordId)}/lead-stage`, {
         stage: next,
       })
       if (!r.success) throw new Error(r.error || 'Could not update lead stage.')
@@ -152,10 +155,10 @@ export default function ResolvedLeadSidebar({
   const handleAddNote = async (event) => {
     event.preventDefault()
     const text = noteText.trim()
-    if (!canManage || !(lead?.id || lead?._id) || !queueItemId || !text || savingNote) return
+    if (!canManage || !(lead?.id || lead?._id) || !recordId || !text || savingNote) return
     setSavingNote(true)
     try {
-      const r = await api.post(`/api/human-queue/${encodeURIComponent(queueItemId)}/notes`, { text })
+      const r = await api.post(`${apiBase}/${encodeURIComponent(recordId)}/notes`, { text })
       if (!r.success) throw new Error(r.error || 'Could not add note.')
       applyNotes(r.data)
       setNoteText('')
@@ -168,11 +171,11 @@ export default function ResolvedLeadSidebar({
   }
 
   const handleDeleteNote = async (noteId) => {
-    if (!canManage || !noteId || !queueItemId || deletingNoteId) return
+    if (!canManage || !noteId || !recordId || deletingNoteId) return
     setDeletingNoteId(noteId)
     try {
       const r = await api.delete(
-        `/api/human-queue/${encodeURIComponent(queueItemId)}/notes/${encodeURIComponent(noteId)}`,
+        `${apiBase}/${encodeURIComponent(recordId)}/notes/${encodeURIComponent(noteId)}`,
       )
       if (!r.success) throw new Error(r.error || 'Could not delete note.')
       applyNotes(r.data)
@@ -184,7 +187,7 @@ export default function ResolvedLeadSidebar({
   }
 
   const handleArrangeCallback = async () => {
-    if (!canManage || !queueItemId || savingCallback) return
+    if (!canManage || !recordId || savingCallback) return
     if (!lead?.id && !lead?._id) {
       toast.error({
         title: 'No lead',
@@ -201,7 +204,7 @@ export default function ResolvedLeadSidebar({
         if (!iso) throw new Error('Pick a valid callback time.')
         body.scheduledTime = iso
       }
-      const r = await api.post(`/api/human-queue/${encodeURIComponent(queueItemId)}/callback`, body)
+      const r = await api.post(`${apiBase}/${encodeURIComponent(recordId)}/callback`, body)
       if (!r.success) throw new Error(r.error || 'Could not arrange callback.')
       setPendingCallback(r.data)
       toast.success({

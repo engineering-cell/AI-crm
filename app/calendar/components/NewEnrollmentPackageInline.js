@@ -9,7 +9,7 @@ import { openCheckoutTab, navigateCheckoutTab, closeCheckoutTab, CHECKOUT_TOAST 
 import { toast } from "@/components/ui/toast";
 import SearchableSelect from "@/components/ui/searchable-select";
 
-import { PAYMENT_METHODS_WITH_SAVED_CARD, SHARE_LINK_METHOD, TIP_METHODS } from "@/lib/paymentMethods";
+import { PAYMENT_METHODS_WITH_SAVED_CARD, SHARE_LINK_METHOD, SHORTFALL_METHODS, SHORTFALL_METHODS_WITH_TERMINAL, TIP_METHODS } from "@/lib/paymentMethods";
 import WalletShortfallField, { walletShortfall } from "@/components/payments/WalletShortfallField";
 import { SendLinkChannelPicker } from "@/components/payments/SendPaymentLinkMenu";
 import TerminalDeviceField, { terminalTipPayload } from "@/components/payments/TerminalDeviceField";
@@ -423,6 +423,17 @@ export default function NewEnrollmentPackageInline({
   // The method that actually collects money; the wallet's share goes as walletAmount.
   const chargeMethod =
     form.billing.method === "wallet" ? (walletRemaining > 0 ? form.billing.shortfallMethod : "cash") : form.billing.method;
+  // The reader can collect what the wallet leaves, but only on a one-time sale: that is the
+  // only flow whose backend charges the reader the remainder. A payment plan would drop
+  // the wallet's share, so Terminal is not offered there.
+  const terminalShortfallAllowed = form.billingType === "one_time";
+  const shortfallMethodOptions = terminalShortfallAllowed ? SHORTFALL_METHODS_WITH_TERMINAL : SHORTFALL_METHODS;
+  // Switching to a billing type that cannot use the reader must not leave it silently chosen.
+  useEffect(() => {
+    if (!terminalShortfallAllowed && form.billing.shortfallMethod === "terminal") {
+      setForm((p) => ({ ...p, billing: { ...p.billing, shortfallMethod: "cash" } }));
+    }
+  }, [terminalShortfallAllowed, form.billing.shortfallMethod]);
   const collectMethodOptions = [...PAYMENT_METHODS_WITH_SAVED_CARD, SHARE_LINK_METHOD];
 
   const chargeableServices = form.services.filter((s) => s.isChargeable !== false);
@@ -520,10 +531,10 @@ export default function NewEnrollmentPackageInline({
     cardChargeAmount > 0 &&
     !cardProcessorReady;
   const terminalNotSelected =
-    step === 2 && form.billing.collectNow && form.billing.method === "terminal" && !deviceID;
+    step === 2 && form.billing.collectNow && chargeMethod === "terminal" && !deviceID;
   // The reader runs its own tip screen, so a tip typed in here as well would either
   // double up or credit money the customer never chose on the device.
-  const readerCollectsTip = form.billing.collectNow && form.billing.method === "terminal";
+  const readerCollectsTip = form.billing.collectNow && chargeMethod === "terminal";
   const savedCardNotSelected =
     step === 2 && form.billing.collectNow && form.billing.method === "saved_card" && !savedCardID;
 
@@ -617,7 +628,7 @@ export default function NewEnrollmentPackageInline({
         collectNow: collect,
         collectAmount: collect ? Number(form.billing.collectAmount) : 0,
         collectDate: effectiveCollectDate || undefined,
-        ...(collect && form.billing.method === "terminal" ? { deviceID, ...terminalTipPayload() } : {}),
+        ...(collect && chargeMethod === "terminal" ? { deviceID, ...terminalTipPayload() } : {}),
         ...(collect && form.billing.method === "saved_card" ? { savedCardID } : {}),
         ...(collect && chargeMethod === "cheque" ? { checkNumber } : {}),
       },
@@ -1344,7 +1355,7 @@ export default function NewEnrollmentPackageInline({
                               </div>
                             )}
                             <TerminalDeviceField
-                              method={form.billing.method}
+                              method={chargeMethod}
                               locationID={locationID}
                               deviceID={deviceID}
                               onDeviceChange={setDeviceID}
@@ -1364,6 +1375,7 @@ export default function NewEnrollmentPackageInline({
                               onWalletAmountChange={(v) => setForm((p) => ({ ...p, billing: { ...p.billing, walletAmount: v } }))}
                               shortfallMethod={form.billing.shortfallMethod}
                               onShortfallMethodChange={(v) => setForm((p) => ({ ...p, billing: { ...p.billing, shortfallMethod: v } }))}
+                              methods={shortfallMethodOptions}
                             />
                             <CheckNumberField
                               method={chargeMethod}
@@ -1466,7 +1478,7 @@ export default function NewEnrollmentPackageInline({
                   )}
                   {form.billing.collectNow && !isLink && (
                     <TerminalDeviceField
-                      method={form.billing.method}
+                      method={chargeMethod}
                       locationID={locationID}
                       deviceID={deviceID}
                       onDeviceChange={setDeviceID}
@@ -1490,6 +1502,7 @@ export default function NewEnrollmentPackageInline({
                       onWalletAmountChange={(v) => setForm((p) => ({ ...p, billing: { ...p.billing, walletAmount: v } }))}
                       shortfallMethod={form.billing.shortfallMethod}
                       onShortfallMethodChange={(v) => setForm((p) => ({ ...p, billing: { ...p.billing, shortfallMethod: v } }))}
+                      methods={shortfallMethodOptions}
                     />
                   )}
                   {form.billing.collectNow && !isLink && (

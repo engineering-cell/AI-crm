@@ -18,7 +18,8 @@ import PaymentDueCard from '@/components/payments/PaymentDueCard'
 import AutopayControl from '@/components/payments/AutopayControl'
 import { useCardProcessor } from '@/app/settings/payments/useCardProcessor'
 import { openCheckoutTab, navigateCheckoutTab, closeCheckoutTab, CHECKOUT_TOAST } from '@/lib/clover'
-import { NO_DEVICE_PAYMENT_METHODS } from '@/lib/paymentMethods'
+import { NO_DEVICE_PAYMENT_METHODS, SHORTFALL_METHODS_WITH_TERMINAL } from '@/lib/paymentMethods'
+import TerminalDeviceField, { terminalTipPayload } from '@/components/payments/TerminalDeviceField'
 import WalletShortfallField, { walletPaymentFields } from '@/components/payments/WalletShortfallField'
 import PaymentMethodPicker from '@/components/payments/PaymentMethodPicker'
 import { fetchWalletBalance } from '@/lib/wallet'
@@ -50,6 +51,7 @@ function PayInstallmentDialog({ target, onClose, onPaid, locationID }) {
   const [walletBalance, setWalletBalance] = useState(0)
   const [paymentDate, setPaymentDate] = useState(todayDateInput)
   const [paying, setPaying] = useState(false)
+  const [deviceID, setDeviceID] = useState('')
   const { ready: cloverReady } = useCardProcessor(locationID || target?.plan)
 
   const customerID = target?.plan?.customerID
@@ -72,6 +74,9 @@ function PayInstallmentDialog({ target, onClose, onPaid, locationID }) {
   })
   const payWithClover = paymentFields.method === 'card' && cloverReady
   const cloverNotConnected = paymentFields.method === 'card' && !cloverReady
+  // The reader can collect what the wallet leaves of an installment.
+  const payWithTerminal = paymentFields.method === 'terminal'
+  const terminalNotSelected = payWithTerminal && !deviceID
 
   async function handlePay() {
     const checkoutTab = payWithClover ? openCheckoutTab() : null
@@ -81,11 +86,15 @@ function PayInstallmentDialog({ target, onClose, onPaid, locationID }) {
         installmentIndex: index,
         paymentDate: dateInputToISO(paymentDate),
         ...paymentFields,
+        ...(payWithTerminal ? { deviceID, ...terminalTipPayload() } : {}),
       })
       if (r.success) {
         if (r.data?.checkoutUrl) {
           navigateCheckoutTab(checkoutTab, r.data.checkoutUrl)
           toast.success(CHECKOUT_TOAST)
+        } else if (r.data?.pending && payWithTerminal) {
+          closeCheckoutTab(checkoutTab)
+          toast.success('Charge sent to the reader — waiting for the card')
         } else {
           closeCheckoutTab(checkoutTab)
           toast.success('Installment paid')
@@ -122,13 +131,20 @@ function PayInstallmentDialog({ target, onClose, onPaid, locationID }) {
           amountDue={amountDue}
           shortfallMethod={shortfallMethod}
           onShortfallMethodChange={setShortfallMethod}
+          methods={SHORTFALL_METHODS_WITH_TERMINAL}
+        />
+        <TerminalDeviceField
+          method={paymentFields.method}
+          locationID={locationID || target?.plan}
+          deviceID={deviceID}
+          onDeviceChange={setDeviceID}
         />
         {cloverNotConnected && (
           <p className="mt-2 text-[11px] text-warning">Connect a card processor (Clover or Stripe) in Settings → Integrations to charge a card.</p>
         )}
         <div className="flex justify-end gap-2 mt-4">
           <Button variant="outline" size="sm" onClick={onClose} disabled={paying}>Cancel</Button>
-          <Button size="sm" onClick={handlePay} disabled={paying || cloverNotConnected} className="bg-success hover:bg-success text-white">
+          <Button size="sm" onClick={handlePay} disabled={paying || cloverNotConnected || terminalNotSelected} className="bg-success hover:bg-success text-white">
             {paying ? 'Saving…' : payWithClover ? 'Pay by card' : `Pay $${Number(inst.amount).toFixed(2)}`}
           </Button>
         </div>

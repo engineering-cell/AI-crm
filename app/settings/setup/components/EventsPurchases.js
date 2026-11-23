@@ -30,13 +30,13 @@ import CheckNumberField from '@/components/payments/CheckNumberField'
 import TerminalDeviceField, { terminalTipPayload } from '@/components/payments/TerminalDeviceField'
 import PaymentMethodPicker from '@/components/payments/PaymentMethodPicker'
 import { SendLinkChannelPicker, sendPaymentLink } from '@/components/payments/SendPaymentLinkMenu'
-import { PAYMENT_METHODS_WITH_SAVED_CARD, SHARE_LINK_METHOD, SHORTFALL_METHODS } from '@/lib/paymentMethods'
+import { PAYMENT_METHODS_WITH_SAVED_CARD, SHARE_LINK_METHOD, SHORTFALL_METHODS, SHORTFALL_METHODS_WITH_TERMINAL } from '@/lib/paymentMethods'
 import WalletShortfallField, { walletShortfall } from '@/components/payments/WalletShortfallField'
 
 // Wallet sits beside the other methods; a balance too small for today's amount asks how to collect the rest.
 const PURCHASE_PAY_METHODS = [...PAYMENT_METHODS_WITH_SAVED_CARD, SHARE_LINK_METHOD]
 // A plan's card/ACH charge takes the whole installment, so only these can share one with the wallet.
-const PLAN_SHORTFALL_METHODS = SHORTFALL_METHODS.filter((m) => ['cash', 'cheque'].includes(m.value))
+const PLAN_SHORTFALL_METHODS = SHORTFALL_METHODS_WITH_TERMINAL.filter((m) => ['cash', 'cheque', 'terminal'].includes(m.value))
 import { useCardProcessor } from '@/app/settings/payments/useCardProcessor'
 
 const money = (n) => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -1053,7 +1053,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated, initialCus
                       onWalletAmountChange={setWalletAmount}
                       shortfallMethod={shortfallMethod}
                       onShortfallMethodChange={setShortfallMethod}
-                      methods={billingType === 'one_time' ? SHORTFALL_METHODS : PLAN_SHORTFALL_METHODS}
+                      methods={billingType === 'one_time' ? SHORTFALL_METHODS_WITH_TERMINAL : PLAN_SHORTFALL_METHODS}
                     />
                   )}
                   {isLink && (
@@ -1070,7 +1070,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated, initialCus
                     </p>
                   )}
                   <TerminalDeviceField
-                    method={payMethod}
+                    method={chargeMethod}
                     locationID={chargeLocation}
                     deviceID={deviceID}
                     onDeviceChange={setDeviceID}

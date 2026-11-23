@@ -10,6 +10,7 @@ import { isNotificationEnabled } from '@/lib/notificationPreferences'
 import { startIncomingRingLoop, stopIncomingRingLoop } from '@/lib/notificationSounds'
 import { getActiveConnection } from '@/lib/twilioVoiceClient'
 import { shouldShowIncomingCallPopup, useLiveQueueCall } from '@/lib/liveQueueCallStore'
+import { useLiveOutboundCall } from '@/lib/liveOutboundCallStore'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { cn, getInitials } from '@/lib/utils'
 
@@ -33,6 +34,7 @@ function sameEmail(a, b) {
 export default function GlobalIncomingCallAlert() {
   const router = useRouter()
   const liveQueue = useLiveQueueCall()
+  const outboundCall = useLiveOutboundCall()
   const [enabled, setEnabled] = useState(false)
   const [online, setOnline] = useState(false)
   const [canAnswer, setCanAnswer] = useState(false)
@@ -149,12 +151,12 @@ export default function GlobalIncomingCallAlert() {
   // Keep Answer/ring in sync when Twilio connection starts on another page surface
   useEffect(() => {
     const tick = () => setAlreadyOnCall(
-      Boolean(getActiveConnection()) || Boolean(liveQueue?.call),
+      Boolean(getActiveConnection()) || Boolean(liveQueue?.call) || Boolean(outboundCall?.call),
     )
     tick()
     const id = setInterval(tick, 1500)
     return () => clearInterval(id)
-  }, [liveQueue?.call])
+  }, [liveQueue?.call, outboundCall?.call])
 
   const visibleWaiting = waiting.filter((item) => {
     const id = waitingItemId(item)
@@ -164,13 +166,15 @@ export default function GlobalIncomingCallAlert() {
   const nextId = nextCall ? waitingItemId(nextCall) : ''
   // Hide only while the live panel is expanded. A minimized call still leaves
   // room for the next waiting caller, docked above the bar.
+  const expandedLiveCall = (liveQueue?.call && !liveQueue?.minimized)
+    || (outboundCall?.call && !outboundCall?.minimized)
   const showPopup = shouldShowIncomingCallPopup({
     nextCall,
     enabled,
     online,
     canAnswer,
-    call: liveQueue?.call,
-    minimized: liveQueue?.minimized,
+    call: expandedLiveCall ? { id: 'live' } : null,
+    minimized: false,
   })
 
   // Ring loop while any waiting call exists for an online agent (including Call Center waiting tab)

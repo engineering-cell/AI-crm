@@ -9,6 +9,8 @@ import {
   Trash2,
   ChevronDown,
   ExternalLink,
+  AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
 import api from "@/lib/api";
 import { formatDate } from "@/lib/utils";
@@ -32,6 +34,28 @@ const TABS = [
   { key: "notes", label: "Notes" },
   { key: "messages", label: "Messages" },
 ];
+
+// Mini-account design tokens (Cadence mini-account redesign).
+const SEG_BTN = (on) =>
+  `rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors ${
+    on
+      ? "bg-primary/10 text-primary"
+      : "bg-muted/60 text-muted-foreground hover:text-foreground"
+  }`;
+const PILL = (warn) =>
+  `whitespace-nowrap rounded-[5px] px-2 py-1 text-[11px] font-medium ${
+    warn ? "bg-warning/10 text-warning" : "bg-success/10 text-success"
+  }`;
+const PANEL = "overflow-hidden rounded-[10px] border border-border bg-card";
+
+function initialsOf(name) {
+  return String(name || "?")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0].toUpperCase())
+    .join("");
+}
 
 function purchaseStatusColor(ps) {
   return (
@@ -1169,17 +1193,23 @@ export default function MiniStudentPanel({
   const { ready: cardProcessorReady } = useCardProcessor(locationID);
 
   const tabs = (
-    <div className="flex border-b border-border shrink-0">
+    <div
+      className="grid shrink-0 grid-cols-6 border-b border-border px-2"
+      role="tablist"
+      aria-label="Mini account sections"
+    >
       {TABS.map((tab) => (
         <button
           key={tab.key}
           type="button"
+          role="tab"
+          aria-selected={activeTab === tab.key}
           onClick={() => setActiveTab(tab.key)}
           className={[
-            "flex-1 py-2.5 text-[10px] font-medium border-b-2 transition-colors",
+            "border-b-2 px-0.5 pb-2.5 pt-3 text-[11px] tracking-tight transition-colors",
             activeTab === tab.key
-              ? "text-foreground border-primary"
-              : "text-muted-foreground border-transparent hover:text-foreground",
+              ? "border-primary font-semibold text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground",
           ].join(" ")}
         >
           {tab.label}
@@ -1203,37 +1233,25 @@ export default function MiniStudentPanel({
           {/* ── APPOINTMENTS ── */}
           {activeTab === "appointments" && (
             <div className="space-y-3">
-              <div className="flex gap-2">
+              <div className="flex gap-1.5">
                 <button
                   type="button"
                   onClick={() => setApptView("upcoming")}
-                  className={`rounded-full px-3 py-1 text-[10px] font-semibold border transition-colors ${
-                    apptView === "upcoming"
-                      ? "bg-brand text-brand-foreground border-brand"
-                      : "bg-background text-muted-foreground border-border hover:bg-muted/40"
-                  }`}
+                  className={SEG_BTN(apptView === "upcoming")}
                 >
                   Upcoming
                 </button>
                 <button
                   type="button"
                   onClick={() => setApptView("past")}
-                  className={`rounded-full px-3 py-1 text-[10px] font-semibold border transition-colors ${
-                    apptView === "past"
-                      ? "bg-brand text-brand-foreground border-brand"
-                      : "bg-background text-muted-foreground border-border hover:bg-muted/40"
-                  }`}
+                  className={SEG_BTN(apptView === "past")}
                 >
                   Past
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowGroups((v) => !v)}
-                  className={`rounded-full px-3 py-1 text-[10px] font-semibold border transition-colors ${
-                    showGroups
-                      ? "bg-brand text-brand-foreground border-brand"
-                      : "bg-background text-muted-foreground border-border hover:bg-muted/40"
-                  }`}
+                  className={SEG_BTN(showGroups)}
                 >
                   Groups
                 </button>
@@ -1276,35 +1294,47 @@ export default function MiniStudentPanel({
                   .map((appt) => (
                     <div
                       key={appt._id}
-                      className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 space-y-0.5"
+                      className="flex items-start gap-3 border-b border-border py-3.5 first:pt-0"
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-[12px] font-semibold text-foreground truncate">
+                      <div className="min-w-[48px] shrink-0 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-center text-[11px] text-muted-foreground">
+                        {new Date(appt.startDateTime)
+                          .toLocaleDateString("en-US", {
+                            month: "short",
+                            timeZone: studioTz || undefined,
+                          })
+                          .toUpperCase()}
+                        <strong className="block text-[20px] font-semibold leading-tight text-foreground">
+                          {new Date(appt.startDateTime).toLocaleDateString(
+                            "en-US",
+                            { day: "numeric", timeZone: studioTz || undefined },
+                          )}
+                        </strong>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] font-semibold text-foreground">
                           {appt.title}
                         </p>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {appt.allocation?.status === "unallocated" && (
-                            <span className="rounded-full bg-warning/20 px-2 py-0.5 text-[9px] font-bold uppercase text-warning">
-                              Unallocated
-                            </span>
-                          )}
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${statusColor(appt.status)}`}
-                          >
-                            {appt.status}
-                          </span>
-                        </div>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground">
-                        {formatStudioDate(appt.startDateTime, studioTz)}
-                        {" · "}
-                        {formatStudioTime(appt.startDateTime, studioTz)}
-                      </p>
-                      {appt.teacherID?.name && (
-                        <p className="text-[10px] text-muted-foreground">
-                          {appt.teacherID.name}
+                        <p className="mt-0.5 text-[12px] text-foreground/80">
+                          {formatStudioDate(appt.startDateTime, studioTz)}
+                          {" · "}
+                          {formatStudioTime(appt.startDateTime, studioTz)}
                         </p>
-                      )}
+                        {appt.teacherID?.name && (
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">
+                            {appt.teacherID.name}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        {appt.allocation?.status === "unallocated" && (
+                          <span className={PILL(true)}>Unallocated</span>
+                        )}
+                        <span
+                          className={`rounded-[5px] px-2 py-1 text-[11px] font-medium capitalize ${statusColor(appt.status)}`}
+                        >
+                          {String(appt.status).replace(/_/g, " ")}
+                        </span>
+                      </div>
                     </div>
                   ))
               )}
@@ -1314,6 +1344,13 @@ export default function MiniStudentPanel({
           {/* ── ENROLLMENTS ── */}
           {activeTab === "enrollments" && (
             <div className="space-y-3">
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <h3 className="text-[14px] font-semibold text-foreground">
+                  Active enrollments
+                  <span className="ml-1 font-normal text-muted-foreground">
+                    · {enrollments.filter((e) => e.package?.status !== "cancelled" && e.status === "active").length}
+                  </span>
+                </h3>
               <EnrollMenu
                 label="New Enrollment"
                 triggerClassName="h-auto rounded-lg px-3 py-1.5 text-[11px]"
@@ -1329,6 +1366,7 @@ export default function MiniStudentPanel({
                 }}
                 onSelectEvent={() => setShowEventPurchaseDialog(true)}
               />
+              </div>
 
               {loadingEnrollments ? (
                 <p className="text-[12px] text-muted-foreground animate-pulse">
@@ -1374,7 +1412,7 @@ export default function MiniStudentPanel({
                   return (
                     <div
                       key={enr._id}
-                      className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 space-y-2"
+                      className="space-y-3"
                     >
                       {/* Enrollment header */}
                       <div
@@ -1383,12 +1421,12 @@ export default function MiniStudentPanel({
                         }
                         className="flex items-center justify-between gap-2 cursor-pointer select-none"
                       >
-                        <p className="text-[12px] font-semibold text-foreground truncate">
+                        <p className="text-[12px] font-semibold text-muted-foreground truncate">
                           {enr.label || `Enrollment #${enr.enrollmentNumber}`}
                         </p>
                         <div className="flex items-center gap-1.5 shrink-0">
                           <span
-                            className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${enrStatusCls}`}
+                            className={`rounded-[5px] px-2 py-1 text-[11px] font-medium capitalize ${enrStatusCls}`}
                           >
                             {enr.status}
                           </span>
@@ -1412,135 +1450,209 @@ export default function MiniStudentPanel({
 
                       {/* Package section */}
                       {cp ? (
-                        <div className="rounded-md border border-border bg-background px-3 py-2.5 space-y-2.5">
+                        <div className={`${PANEL} space-y-3.5 px-4 py-4`}>
                           {/* Package header */}
-                          <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
-                              <p className="text-[12px] font-semibold text-foreground truncate">
+                              <p className="text-[14px] font-semibold text-foreground truncate">
                                 {cp.packageName ||
                                   cp.packageRef?.packageName ||
                                   "Package"}
                               </p>
-                              {cp.purchaseDate && (
-                                <p className="text-[10px] text-muted-foreground">
-                                  Purchased {formatDate(cp.purchaseDate)}
-                                </p>
-                              )}
+                              <p className="mt-1 text-[11px] text-muted-foreground">
+                                Available to {customerName}
+                              </p>
                             </div>
                             <span
-                              className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${pkgStatusCls}`}
+                              className={
+                                cp.paymentStatus === "paid" || !cp.paymentStatus
+                                  ? PILL(false) + (cp.status !== "active" ? " !bg-muted !text-muted-foreground" : "")
+                                  : PILL(true)
+                              }
                             >
-                              {cp.status}
+                              {cp.status !== "active"
+                                ? cp.status
+                                : cp.paymentStatus === "partial"
+                                  ? "Partially paid"
+                                  : cp.paymentStatus === "unpaid"
+                                    ? "Unpaid"
+                                    : "Paid in full"}
                             </span>
                           </div>
 
-                          {/* Expiry + payment */}
-                          <div className="grid grid-cols-2 gap-2">
-                            {cp.expiryDate && (
-                              <div className="rounded bg-muted/40 px-2 py-1.5">
-                                <p className="text-[9px] text-muted-foreground mb-0.5">
-                                  Expires
-                                </p>
-                                <p className="text-[10px] font-semibold text-foreground">
-                                  {formatDate(cp.expiryDate)}
-                                </p>
-                              </div>
-                            )}
-                            {cp.totalPaid != null && (
-                              <div className="rounded bg-muted/40 px-2 py-1.5">
-                                <p className="text-[9px] text-muted-foreground mb-0.5">
-                                  Total Paid
-                                </p>
-                                <p className="text-[10px] font-semibold text-foreground">
-                                  ${Number(cp.totalPaid).toFixed(2)}
-                                  {cp.paymentStatus && (
-                                    <span
-                                      className={`ml-1.5 text-[9px] font-bold uppercase ${
-                                        cp.paymentStatus === "paid"
-                                          ? "text-success"
-                                          : cp.paymentStatus === "partial"
-                                            ? "text-warning"
-                                            : "text-destructive"
-                                      }`}
-                                    >
-                                      {cp.paymentStatus}
-                                    </span>
-                                  )}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Services */}
-                          {cp.services?.length > 0 && (
-                            <div className="space-y-2 border-t border-border pt-2">
-                              <p className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
-                                Services
-                              </p>
-                              {cp.services.map((svc, i) => {
-                                const pct =
-                                  svc.sessionsTotal > 0
-                                    ? Math.round(
-                                        ((svc.sessionsTotal -
-                                          svc.sessionsRemaining) /
-                                          svc.sessionsTotal) *
-                                          100,
-                                      )
-                                    : 0;
-                                return (
-                                  <div key={i} className="space-y-1.5">
-                                    <div className="flex items-start justify-between gap-2">
-                                      <div className="min-w-0">
-                                        <p className="text-[11px] font-semibold text-foreground truncate">
-                                          {svc.serviceName}
-                                        </p>
-                                        {svc.serviceCode && (
-                                          <p className="text-[9px] text-muted-foreground">
-                                            {svc.serviceCode}
-                                          </p>
-                                        )}
-                                      </div>
-                                      <div className="text-right shrink-0">
-                                        <p className="text-[11px] font-bold text-foreground">
-                                          {svc.sessionsRemaining}
-                                          <span className="text-muted-foreground font-normal">
-                                            /{svc.sessionsTotal}
+                          {/* Lessons left, per service */}
+                          {(() => {
+                            const svcs = cp.services ?? [];
+                            const total = Number(cp.totalPaid ?? 0);
+                            const collected = Number(cp.amountCollected ?? 0);
+                            const remainingBalance = Math.max(0, total - collected);
+                            const showCoverage =
+                              remainingBalance > 0.009 &&
+                              cp.paymentStatus !== "paid";
+                            const chargeable = svcs.filter(
+                              (sv) =>
+                                sv.isChargeable !== false &&
+                                Number(sv.finalAmount || 0) > 0,
+                            );
+                            const chargeableSessions = chargeable.reduce(
+                              (t, sv) =>
+                                t + (sv.sessionsUsed ?? 0) + (sv.sessionsRemaining ?? 0),
+                              0,
+                            );
+                            const perSession =
+                              chargeableSessions > 0 && total > 0
+                                ? total / chargeableSessions
+                                : 0;
+                            const paidSessions =
+                              perSession > 0 ? Math.floor(collected / perSession + 1e-6) : 0;
+                            let paidBudget = Math.max(
+                              0,
+                              paidSessions -
+                                chargeable.reduce((t, sv) => t + (sv.sessionsUsed ?? 0), 0),
+                            );
+                            const unpaidTotal = showCoverage
+                              ? chargeable.reduce(
+                                  (t, sv) => t + (sv.sessionsRemaining ?? 0),
+                                  0,
+                                ) - paidBudget
+                              : 0;
+                            return (
+                              <>
+                                {svcs.length > 0 && (
+                                  <div className="grid grid-cols-2 gap-3.5">
+                                    {svcs.map((svc, i) => {
+                                      const isCh = chargeable.includes(svc);
+                                      const rem = svc.sessionsRemaining ?? 0;
+                                      const paid = isCh && showCoverage ? Math.min(rem, paidBudget) : rem;
+                                      if (isCh && showCoverage) paidBudget -= paid;
+                                      const unpaid = rem - paid;
+                                      return (
+                                        <div key={i}>
+                                          <strong className="block text-[28px] font-semibold leading-tight tracking-tight tabular-nums text-foreground">
+                                            {rem}
+                                          </strong>
+                                          <span className="mt-1 block text-[12px] text-muted-foreground">
+                                            {svc.serviceName} left
                                           </span>
-                                        </p>
-                                        <p className="text-[9px] text-muted-foreground">
-                                          sessions left
+                                          {isCh && showCoverage && (
+                                            <p className="mt-2.5 flex flex-wrap gap-2 text-[12px]">
+                                              {paid > 0 && (
+                                                <span className="text-success">{paid} paid</span>
+                                              )}
+                                              {unpaid > 0 && (
+                                                <span className="text-warning">{unpaid} unpaid</span>
+                                              )}
+                                            </p>
+                                          )}
+                                          <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-muted">
+                                            <div
+                                              className={`h-full rounded-full ${rem === 0 ? "bg-destructive" : "bg-primary"}`}
+                                              style={{
+                                                width: `${svc.sessionsTotal > 0 ? (rem / svc.sessionsTotal) * 100 : 0}%`,
+                                              }}
+                                            />
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+
+                                {showCoverage ? (
+                                  <div className="-mx-4 -mb-0 mt-1 border-t border-border bg-warning/10 px-4 py-3 text-warning">
+                                    <p className="flex items-start gap-2 text-[12px] font-semibold">
+                                      <AlertCircle className="mt-px h-[15px] w-[15px] shrink-0" />
+                                      {unpaidTotal > 0
+                                        ? `${unpaidTotal} lesson${unpaidTotal === 1 ? " is" : "s are"} not yet paid for`
+                                        : "Balance remaining on this enrollment"}
+                                    </p>
+                                    <div className="mt-3 flex items-center justify-between gap-2 text-foreground">
+                                      <div>
+                                        <strong className="text-[13px] font-semibold">
+                                          {money(remainingBalance)} remaining
+                                        </strong>
+                                        <p className="mt-1 text-[11px] text-muted-foreground">
+                                          {money(collected)} paid of {money(total)}
                                         </p>
                                       </div>
-                                    </div>
-                                    {/* Progress bar */}
-                                    <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
-                                      <div
-                                        className={`h-full rounded-full transition-all ${svc.sessionsRemaining === 0 ? "bg-destructive" : "bg-primary"}`}
-                                        style={{ width: `${100 - pct}%` }}
-                                      />
-                                    </div>
-                                    <div className="flex items-center justify-between text-[9px] text-muted-foreground">
-                                      <span>{svc.sessionsUsed} used</span>
-                                      <span>
-                                        $
-                                        {Number(svc.pricePerSession).toFixed(2)}
-                                        /session
-                                        {svc.discountType !== "none" &&
-                                          svc.discountAmount > 0 && (
-                                            <span className="ml-1 text-success">
-                                              -
-                                              {svc.discountType === "percentage"
-                                                ? `${svc.discountAmount}%`
-                                                : `$${svc.discountAmount}`}
-                                            </span>
-                                          )}
-                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setActiveTab("payments")}
+                                        className="rounded-md border border-border bg-card px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-muted/40"
+                                      >
+                                        View payments →
+                                      </button>
                                     </div>
                                   </div>
-                                );
-                              })}
-                            </div>
-                          )}
+                                ) : (
+                                  svcs.length > 0 && (
+                                    <div className="-mx-4 flex items-center justify-between gap-2 border-t border-border bg-muted/40 px-4 py-2.5 text-[11px] text-muted-foreground">
+                                      <span>All remaining lessons are paid for</span>
+                                      <CheckCircle2 className="h-4 w-4 text-success" />
+                                    </div>
+                                  )
+                                )}
+
+                                {/* Enrollment details (collapsed by default) */}
+                                <details className="group">
+                                  <summary className="flex cursor-pointer list-none items-center justify-between text-[12px] font-medium text-foreground">
+                                    Enrollment details
+                                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
+                                  </summary>
+                                  <div className="mt-3 grid gap-2 text-[12px]">
+                                    {svcs.map((svc, i) => (
+                                      <div key={i} className="flex justify-between gap-4">
+                                        <span className="text-muted-foreground">{svc.serviceName}</span>
+                                        <span className="text-foreground">
+                                          {svc.sessionsTotal} included · {svc.sessionsUsed ?? 0} used
+                                          {Number(svc.pricePerSession) > 0 && (
+                                            <span className="text-muted-foreground">
+                                              {" "}· ${Number(svc.pricePerSession).toFixed(2)}/session
+                                              {svc.discountType !== "none" && svc.discountAmount > 0 && (
+                                                <span className="ml-1 text-success">
+                                                  -{svc.discountType === "percentage" ? `${svc.discountAmount}%` : `$${svc.discountAmount}`}
+                                                </span>
+                                              )}
+                                            </span>
+                                          )}
+                                        </span>
+                                      </div>
+                                    ))}
+                                    {cp.totalPaid != null && (
+                                      <div className="flex justify-between gap-4">
+                                        <span className="text-muted-foreground">Enrollment total</span>
+                                        <strong className="font-semibold text-foreground">{money(total)}</strong>
+                                      </div>
+                                    )}
+                                    {cp.amountCollected != null && (
+                                      <div className="flex justify-between gap-4">
+                                        <span className="text-muted-foreground">Paid toward this enrollment</span>
+                                        <strong className="font-semibold text-foreground">{money(collected)}</strong>
+                                      </div>
+                                    )}
+                                    {remainingBalance > 0.009 && (
+                                      <div className="flex justify-between gap-4">
+                                        <span className="text-muted-foreground">Remaining balance</span>
+                                        <strong className="font-semibold text-foreground">{money(remainingBalance)}</strong>
+                                      </div>
+                                    )}
+                                    {cp.purchaseDate && (
+                                      <div className="flex justify-between gap-4">
+                                        <span className="text-muted-foreground">Purchased</span>
+                                        <span className="text-foreground">{formatDate(cp.purchaseDate)}</span>
+                                      </div>
+                                    )}
+                                    {cp.expiryDate && (
+                                      <div className="flex justify-between gap-4">
+                                        <span className="text-muted-foreground">Expires</span>
+                                        <span className="text-foreground">{formatDate(cp.expiryDate)}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </details>
+                              </>
+                            );
+                          })()}
 
                           {cp.notes && (
                             <p className="text-[10px] text-muted-foreground italic border-t border-border pt-2">
@@ -1905,7 +2017,7 @@ export default function MiniStudentPanel({
           {activeTab === "messages" && (
             <div className="space-y-3">
               {/* SMS / Email toggle */}
-              <div className="flex rounded-lg border border-border overflow-hidden text-[11px] font-medium">
+              <div className="flex gap-1.5">
                 <button
                   type="button"
                   onClick={() => {
@@ -1913,7 +2025,7 @@ export default function MiniStudentPanel({
                     setMsgError(null);
                     setMsgSuccess(null);
                   }}
-                  className={`flex-1 py-2 transition-colors ${msgMode === "sms" ? "bg-brand text-brand-foreground" : "text-muted-foreground hover:bg-muted/40"}`}
+                  className={SEG_BTN(msgMode === "sms")}
                 >
                   SMS
                 </button>
@@ -1924,7 +2036,7 @@ export default function MiniStudentPanel({
                     setMsgError(null);
                     setMsgSuccess(null);
                   }}
-                  className={`flex-1 py-2 transition-colors ${msgMode === "email" ? "bg-brand text-brand-foreground" : "text-muted-foreground hover:bg-muted/40"}`}
+                  className={SEG_BTN(msgMode === "email")}
                 >
                   Email
                 </button>
@@ -2218,11 +2330,11 @@ export default function MiniStudentPanel({
             <div className="space-y-3">
               {/* Summary row */}
               <div className="grid grid-cols-3 gap-2">
-                <div className="rounded-lg border border-border bg-muted/30 px-2 py-2">
-                  <p className="text-[9px] text-muted-foreground mb-0.5 leading-tight">
+                <div className="rounded-[10px] border border-border bg-card px-3 py-2.5">
+                  <p className="text-[11px] text-muted-foreground mb-0.5 leading-tight">
                     Auto Charged
                   </p>
-                  <p className="text-[15px] font-bold text-violet-500">
+                  <p className="text-[20px] font-semibold tracking-tight tabular-nums text-violet-500">
                     $
                     {serviceCharges
                       .reduce(
@@ -2239,22 +2351,22 @@ export default function MiniStudentPanel({
                       .toFixed(2)}
                   </p>
                 </div>
-                <div className="rounded-lg border border-border bg-muted/30 px-2 py-2">
-                  <p className="text-[9px] text-muted-foreground mb-0.5 leading-tight">
+                <div className="rounded-[10px] border border-border bg-card px-3 py-2.5">
+                  <p className="text-[11px] text-muted-foreground mb-0.5 leading-tight">
                     Collected
                   </p>
-                  <p className="text-[15px] font-bold text-success">
+                  <p className="text-[20px] font-semibold tracking-tight tabular-nums text-success">
                     $
                     {collectedPayments
                       .reduce((sum, p) => sum + Number(p.amount ?? 0), 0)
                       .toFixed(2)}
                   </p>
                 </div>
-                <div className="rounded-lg border border-border bg-muted/30 px-2 py-2">
-                  <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground mb-0.5 leading-tight">
+                <div className="rounded-[10px] border border-border bg-card px-3 py-2.5">
+                  <p className="text-[11px] text-muted-foreground mb-0.5 leading-tight">
                     Credit Balance
                   </p>
-                  <p className="text-[15px] font-bold text-success">
+                  <p className="text-[20px] font-semibold tracking-tight tabular-nums text-success">
                     {totalSessionsRemaining != null
                       ? Number.isInteger(totalSessionsRemaining)
                         ? totalSessionsRemaining
@@ -2267,15 +2379,23 @@ export default function MiniStudentPanel({
               </div>
 
               {/* Payment view filter */}
-              <select
-                value={paymentView}
-                onChange={(e) => setPaymentView(e.target.value)}
-                className="h-8 w-full rounded-md border border-border bg-background px-2.5 text-[11px] outline-none focus:border-primary text-foreground"
-              >
-                <option value="due">Payments Due</option>
-                <option value="auto">Auto-charged (autopay)</option>
-                <option value="collected">Collected Payments</option>
-              </select>
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Payment view">
+                {[
+                  ["due", "Payments due"],
+                  ["auto", "Auto-charged"],
+                  ["collected", "Payment history"],
+                ].map(([k, label]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    aria-pressed={paymentView === k}
+                    onClick={() => setPaymentView(k)}
+                    className={SEG_BTN(paymentView === k)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
 
               {/* Upcoming payments — flexible, payment plan, pay-per-session */}
               {paymentView === "due" &&
@@ -2782,7 +2902,7 @@ export default function MiniStudentPanel({
                   value={newNoteText}
                   onChange={(e) => setNewNoteText(e.target.value)}
                   placeholder="Add a note…"
-                  className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-[12px] text-foreground outline-none focus:border-primary"
+                  className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2.5 text-[13px] text-foreground outline-none focus:border-primary"
                 />
                 <button
                   type="button"
@@ -2803,17 +2923,22 @@ export default function MiniStudentPanel({
                 sortedNotes.map((note) => (
                   <div
                     key={note._id}
-                    className={`rounded-lg border px-3 py-2.5 space-y-1.5 ${
+                    className={`rounded-[9px] border px-3.5 py-3 space-y-2 ${
                       note.isPinned
-                        ? "border-primary/40 bg-primary/5"
-                        : "border-border bg-muted/30"
+                        ? "border-primary/30 bg-primary/10"
+                        : "border-border bg-card"
                     }`}
                   >
-                    <p className="text-[12px] text-foreground whitespace-pre-wrap">
+                    <p className="text-[13px] text-foreground whitespace-pre-wrap break-words">
                       {note.text}
                     </p>
                     <div className="flex items-center justify-between">
-                      <p className="text-[10px] text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                        {note.isPinned && (
+                          <span className="inline-flex items-center gap-1 text-primary">
+                            <Pin className="h-3 w-3" /> Pinned ·
+                          </span>
+                        )}
                         {formatDate(note.createdAt)}
                       </p>
                       <div className="flex items-center gap-1">
@@ -2918,21 +3043,17 @@ export default function MiniStudentPanel({
     <>
       <aside className="h-full w-full max-w-full sm:w-[380px] shrink-0 rounded-xl border border-border bg-card shadow-lg flex flex-col">
         {/* Header */}
-        <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
+        <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3 shrink-0">
           <button
             type="button"
             onClick={onBack}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
+            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
             aria-label="Back to event"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Appointment
           </button>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[13px] font-semibold text-foreground">
-              {customerName}
-            </p>
-            <p className="text-[10px] text-muted-foreground">Student Account</p>
-          </div>
+          <span className="text-[11px] text-muted-foreground">Mini account</span>
           <Link
             href={`/settings/users-roles/customers/${customerId}`}
             className="flex shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-primary transition-colors"
@@ -2940,6 +3061,19 @@ export default function MiniStudentPanel({
             <ExternalLink className="h-3 w-3" />
             Full Account
           </Link>
+        </div>
+        <div className="flex shrink-0 items-center gap-3 px-4 pb-3 pt-4">
+          <div className="grid h-[43px] w-[43px] shrink-0 place-items-center rounded-full bg-primary/10 text-[15px] font-semibold text-primary">
+            {initialsOf(customerName)}
+          </div>
+          <div className="min-w-0">
+            <h2 className="truncate text-[17px] font-semibold leading-tight tracking-tight text-foreground">
+              {customerName}
+            </h2>
+            <p className="mt-1 text-[12px] text-muted-foreground">
+              Individual account
+            </p>
+          </div>
         </div>
         {tabs}
         {body}

@@ -193,7 +193,7 @@ export default function MembershipEditPage() {
     const payload = {
       membershipName: membershipName.trim(),
       locationID: locationID || undefined,
-      description: description.trim() || undefined,
+      description: description.trim(),
       color,
       durationDays: durationDays === '' ? 30 : Number(durationDays),
       price: price === '' ? 0 : Number(price),

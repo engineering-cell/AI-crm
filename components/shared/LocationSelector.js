@@ -275,6 +275,27 @@ export default function LocationSelector({
                 <div className="h-px bg-border my-1" />
               </>
             )}
+            {isMultiple && locations.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    didAutoSelectRef.current = true
+                    const allSelected = locations.every((l) => selectedIds.includes(String(l._id)))
+                    onChange(allSelected ? [] : locations.map((l) => String(l._id)))
+                  }}
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm font-medium text-brand text-left hover:bg-muted transition-colors"
+                >
+                  <span>
+                    {locations.every((l) => selectedIds.includes(String(l._id))) ? 'Clear all' : 'Select all'}
+                  </span>
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {selectedIds.length} of {locations.length} selected
+                  </span>
+                </button>
+                <div className="h-px bg-border my-1" />
+              </>
+            )}
             {locations.length === 0 ? (
               <div className="px-3 py-4 text-sm text-center text-muted-foreground">
                 {loading ? 'Loading locations...' : 'No locations available'}

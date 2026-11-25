@@ -25,8 +25,8 @@ export const ENROLL_OPTIONS = [
   },
   {
     mode: "trial",
-    label: "Trial / Intro",
-    description: "Sell a first lesson to a lead",
+    label: "Intro or group",
+    description: "Sell an intro lesson or one group class",
     icon: Sparkles,
   },
 ];
@@ -73,13 +73,12 @@ export default function EnrollMenu({
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
-  // Trial/Intro hits POST /api/payment-request/lead which requires
-  // settings/Billings/write — hide the option when the role can't sell.
+  // Intro or group hits payment-request APIs which require
+  // settings/Billings/write — hide that choice when the role can't sell.
   const visibleOptions = useMemo(
     () =>
       ENROLL_OPTIONS.filter(
-        (o) =>
-          o.mode !== "trial" || hasPermission("settings", "Billings", "write"),
+        (o) => o.mode !== "trial" || hasPermission("settings", "Billings", "write"),
       ),
     [],
   );

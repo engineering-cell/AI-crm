@@ -1,0 +1,23 @@
+{
+  "app": {
+    "[project]/app/ai-automation/ai-reply-reviews/page": [
+      "static/media/07c7676b89ed2778-s.p.2bn3s6zvc0dyp.woff2",
+      "static/media/edb99fec956915f8-s.p.32sris142tqlb.woff2"
+    ],
+    "[project]/app/ai-automation/rag/page": [
+      "static/media/07c7676b89ed2778-s.p.2bn3s6zvc0dyp.woff2",
+      "static/media/edb99fec956915f8-s.p.32sris142tqlb.woff2"
+    ],
+    "[project]/app/auth/login/page": [
+      "static/media/07c7676b89ed2778-s.p.2bn3s6zvc0dyp.woff2",
+      "static/media/edb99fec956915f8-s.p.32sris142tqlb.woff2"
+    ],
+    "[project]/app/dashboard/page": [
+      "static/media/07c7676b89ed2778-s.p.2bn3s6zvc0dyp.woff2",
+      "static/media/edb99fec956915f8-s.p.32sris142tqlb.woff2"
+    ]
+  },
+  "appUsingSizeAdjust": true,
+  "pages": {},
+  "pagesUsingSizeAdjust": false
+}

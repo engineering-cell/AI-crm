@@ -1,0 +1,6 @@
+{
+  "/ai-automation/ai-reply-reviews/page": "app/ai-automation/ai-reply-reviews/page.js",
+  "/ai-automation/rag/page": "app/ai-automation/rag/page.js",
+  "/auth/login/page": "app/auth/login/page.js",
+  "/dashboard/page": "app/dashboard/page.js"
+}

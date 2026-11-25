@@ -4,6 +4,7 @@ import { Suspense, useCallback, useMemo } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import MainLayout from '@/components/layout/MainLayout'
 import { Tabs } from '@/components/ui/tabs'
+import { isSuperAdmin } from '@/lib/permissions'
 import DocumentLibraryTab from './components/DocumentLibraryTab'
 import SmsPromptTab from './components/SmsPromptTab'
 import {
@@ -18,7 +19,10 @@ function AiMessagingPageInner() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const rawView = searchParams?.get('view')
-  const activeTab = VALID_VIEWS.includes(rawView) ? rawView : 'prompt'
+  const canManageKnowledgeBase = isSuperAdmin()
+  const activeTab = VALID_VIEWS.includes(rawView) && (rawView !== 'knowledge-base' || canManageKnowledgeBase)
+    ? rawView
+    : 'prompt'
   const workingLocationID = useMemo(
     () => normalizeWorkingLocation(searchParams?.get('locationID')),
     [searchParams],
@@ -66,7 +70,7 @@ function AiMessagingPageInner() {
             workingLocationID={workingLocationID}
             onWorkingLocationChange={setWorkingLocationID}
           />
-          <DocumentLibraryTab
+          {canManageKnowledgeBase && <DocumentLibraryTab
             activeView={activeTab}
             workingLocationID={workingLocationID}
             onWorkingLocationChange={setWorkingLocationID}
@@ -77,7 +81,7 @@ function AiMessagingPageInner() {
             entityLabel="document"
             entityPlural="documents"
             requireActive
-          />
+          />}
           <DocumentLibraryTab
             activeView={activeTab}
             workingLocationID={workingLocationID}

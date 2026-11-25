@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["file:///C:/Users/kshaarma.AD/Documents/Front%20end/AI-crm/app/ai-automation/layout.js"],"sourcesContent":["export default function AiAutomationLayout({ children }) {\r\n  return children\r\n}\r\n"],"names":["AiAutomationLayout","children"],"mappings":";;;;AAAe,SAASA,mBAAmB,EAAEC,QAAQ,EAAE;IACrD,OAAOA;AACT"}}]
+}

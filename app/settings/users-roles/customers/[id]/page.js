@@ -1205,6 +1205,9 @@ function PaymentSchedule({
     reconciledRef.current = key;
     const target = Math.max(0, Number(outstanding));
     const base = Math.floor((target / pending.length) * 100) / 100;
+    // An installment can't be set to $0 (the API rejects it), so a paid-off balance with
+    // installments still pending is not something this can heal.
+    if (base <= 0) return;
     Promise.all(
       pending.map((inst, i) => {
         const amount = i === pending.length - 1 ? Number((target - base * (pending.length - 1)).toFixed(2)) : base;
@@ -1213,7 +1216,10 @@ function PaymentSchedule({
           amount,
         });
       }),
-    ).then(() => onSent?.());
+    ).then((results) => {
+      // Reload only if something changed; reloading after a rejected update retries it forever.
+      if (results.some((r) => r.success)) onSent?.();
+    });
   }, [plan, outstanding, billingType, onSent]);
 
   if (!plan) return null;
@@ -5313,8 +5319,9 @@ function PurchasesTab({ customerID, customerName, locationID, initialPurchaseID 
   const [cancelTarget, setCancelTarget] = useState(null); // purchase row
   const [cancelling, setCancelling] = useState(false);
 
+  // The spinner is for the first load only: showing it on a refresh unmounts the whole tab,
+  // which flickers and resets what its children remember.
   const load = useCallback(async () => {
-    setLoading(true);
     const [pRes, payRes, planRes] = await Promise.all([
       api.get(`/api/purchase?customerID=${customerID}&limit=100`),
       api.get(`/api/payment/customer/${customerID}?limit=200`),

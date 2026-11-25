@@ -6,6 +6,8 @@ export default function EmailMessageInput({
   onSendMessage,
   disabled = false,
   sending = false,
+  replyTarget = null,
+  onClearReply = null,
 }) {
   return (
     <ConversationComposer
@@ -13,6 +15,8 @@ export default function EmailMessageInput({
       onSendMessage={onSendMessage}
       disabled={disabled}
       sending={sending}
+      replyTarget={replyTarget}
+      onClearReply={onClearReply}
     />
   )
 }

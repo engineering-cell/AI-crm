@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/toast'
 import {
+  buildReplySubject,
   getScheduleMinLocalDatetime,
   htmlToPlainText,
   toScheduleIsoOrNull,
@@ -39,6 +40,9 @@ function EmailComposer({
   onSendMessage,
   disabled = false,
   sending = false,
+  // Message being replied to (keeps Gmail/Outlook in the same thread).
+  replyTarget = null,
+  onClearReply = null,
 }) {
   const toast = useToast()
   const [message, setMessage] = useState('')
@@ -50,6 +54,7 @@ function EmailComposer({
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false)
   const [localSending, setLocalSending] = useState(false)
   const sendLockRef = useRef(false)
+  const lastReplyIdRef = useRef(null)
 
   const usingHtmlTemplate = Boolean(String(contentHtml || '').trim())
   const { ref: textareaRef, resize } = useAutoResizeTextarea(message)
@@ -64,9 +69,17 @@ function EmailComposer({
 
   const minDateTime = getScheduleMinLocalDatetime()
 
+  // When staff picks Reply (or the thread auto-targets the latest email), fill Re: subject.
+  useEffect(() => {
+    const replyId = replyTarget?.id || null
+    if (!replyId || replyId === lastReplyIdRef.current) return
+    lastReplyIdRef.current = replyId
+    setSubject(buildReplySubject(replyTarget.subject || ''))
+  }, [replyTarget?.id, replyTarget?.subject])
+
   const resetForm = () => {
     setMessage('')
-    setSubject('')
+    setSubject(replyTarget ? buildReplySubject(replyTarget.subject || '') : '')
     setScheduleMode('now')
     setScheduleDate('')
     setContentHtml(null)
@@ -124,6 +137,9 @@ function EmailComposer({
         channel: 'Email',
         scheduleNow: scheduleMode === 'now',
         scheduleDate: scheduleIso,
+        replyToHistoryId: replyTarget?.id || null,
+        inReplyTo: replyTarget?.rfcMessageId || null,
+        references: replyTarget?.references || null,
       })
       if (ok === true) resetForm()
     } finally {
@@ -143,6 +159,30 @@ function EmailComposer({
 
   return (
     <div className="border-t border-border bg-card/80 px-3 py-3 backdrop-blur-sm sm:px-4 sm:py-4">
+      {replyTarget ? (
+        <div className="mb-2 flex items-start gap-2 rounded-xl border border-[color:var(--studio-primary)]/25 bg-[color:var(--studio-primary-light)]/40 px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--studio-primary)]">
+              Replying in thread
+            </p>
+            <p className="truncate text-xs font-medium text-foreground">
+              {replyTarget.subject?.trim() || '(No subject)'}
+            </p>
+          </div>
+          {onClearReply ? (
+            <button
+              type="button"
+              onClick={onClearReply}
+              disabled={isBusy}
+              className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-50"
+              aria-label="Start a new email instead"
+              title="Start a new email"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="mb-3">
         <input
           type="text"
@@ -564,6 +604,8 @@ export default function ConversationComposer({
   onSendMessage,
   disabled = false,
   sending = false,
+  replyTarget = null,
+  onClearReply = null,
 }) {
   if (variant === 'email') {
     return (
@@ -571,6 +613,8 @@ export default function ConversationComposer({
         onSendMessage={onSendMessage}
         disabled={disabled}
         sending={sending}
+        replyTarget={replyTarget}
+        onClearReply={onClearReply}
       />
     )
   }

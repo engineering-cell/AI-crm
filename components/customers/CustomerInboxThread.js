@@ -608,6 +608,9 @@ export default function CustomerInboxThread({
     contentHtml = null,
     // A household member picked in the thread (instead of the account holder).
     recipient = null,
+    replyToHistoryId = null,
+    inReplyTo = null,
+    references = null,
   }) => {
     if (!(String(contentHtml || content || '').trim())) return false
 
@@ -737,6 +740,9 @@ export default function CustomerInboxThread({
         scheduleNow,
         scheduleDate,
         useTemplate: Boolean(htmlForSend),
+        replyToHistoryId,
+        inReplyTo,
+        references,
       })
       const preferredLocationID = payload.preferredLocationID || null
       const result = await api.post(

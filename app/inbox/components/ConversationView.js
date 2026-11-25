@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import { Mail, MailWarning, ArrowLeft, RefreshCw, Hash } from 'lucide-react'
+import { Mail, MailWarning, ArrowLeft, RefreshCw, Hash, Reply } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -78,6 +78,9 @@ export default function ConversationView({
   // Who a text / call / email goes to: the account holder ('self') or a household member.
   const [recipientKey, setRecipientKey] = useState('self')
   const [savingName, setSavingName] = useState(false)
+  // Which email the composer is replying to (same Gmail/Outlook thread).
+  const [replyTarget, setReplyTarget] = useState(null)
+  const [replyPinned, setReplyPinned] = useState(false)
   const isOther = String(conversation?.contact?.type || '').toLowerCase() === 'other'
   // Unknown numbers and leads can be renamed here (e.g. a caller who turns out to be a student).
   const canRename = isOther || String(conversation?.contact?.type || '').toLowerCase() === 'lead'
@@ -112,11 +115,32 @@ export default function ConversationView({
     setActiveTab(defaultChannelTab(conversation))
     setNameDraft(null)
     setRecipientKey('self')
+    setReplyTarget(null)
+    setReplyPinned(false)
     prevScrollHeightRef.current = 0
     isLoadingMoreRef.current = false
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [conversation?.id])
+
+  // Default: reply to the latest inbound email (else latest any) so sends stay in-thread.
+  useEffect(() => {
+    if (replyPinned) return
+    const emails = (messages || []).filter((m) => m.channel === 'Email' && m.id)
+    if (!emails.length) {
+      setReplyTarget(null)
+      return
+    }
+    let latest = null
+    for (let i = emails.length - 1; i >= 0; i -= 1) {
+      if (emails[i].direction === 'inbound') {
+        latest = emails[i]
+        break
+      }
+    }
+    if (!latest) latest = emails[emails.length - 1]
+    setReplyTarget(latest)
+  }, [messages, replyPinned])
 
   useEffect(() => {
     if (activeTab === 'E-mail') onEmailTabActive?.()
@@ -557,6 +581,26 @@ export default function ConversationView({
                                 </div>
                               </div>
                             )}
+                            <div
+                              className={cn(
+                                'flex items-center gap-2 border-t px-3 py-1.5',
+                                isInbound ? 'border-border bg-muted/30' : 'border-[color:var(--studio-primary)]/15 bg-[color:var(--studio-primary-light)]/40',
+                              )}
+                            >
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setReplyPinned(true)
+                                  setReplyTarget(message)
+                                  setActiveTab('E-mail')
+                                }}
+                                className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                              >
+                                <Reply className="h-3 w-3" />
+                                Reply
+                              </button>
+                            </div>
                           </div>
                         ) : (
                           <>
@@ -642,6 +686,11 @@ export default function ConversationView({
             <EmailMessageInput
               onSendMessage={sendToRecipient}
               sending={emailSending}
+              replyTarget={replyTarget}
+              onClearReply={() => {
+                setReplyPinned(true)
+                setReplyTarget(null)
+              }}
             />
           ) : (
             <div className="border-t border-border bg-card px-4 py-6 text-center">

@@ -1126,6 +1126,10 @@ function InboxPageContent() {
     target = null,
     // A household member picked in the conversation (instead of the account holder).
     recipient = null,
+    // Parent EmailHistory id — keeps this send in the same mailbox thread.
+    replyToHistoryId = null,
+    inReplyTo = null,
+    references = null,
   }) => {
     const convId = target?.convId || selectedConversationRef.current || selectedConversation
     if (!convId || !(String(contentHtml || content || '').trim())) return false
@@ -1380,6 +1384,9 @@ function InboxPageContent() {
           scheduleNow,
           scheduleDate,
           useTemplate: Boolean(htmlForSend),
+          replyToHistoryId,
+          inReplyTo,
+          references,
         })
         const preferredLocationID = payload.preferredLocationID || null
         const result = await api.post(

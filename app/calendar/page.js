@@ -13,6 +13,8 @@ import { CalendarDays, ChevronLeft, ChevronRight, ChevronDown, Settings2 } from 
 import AppointmentComposerPanel from "./components/AppointmentComposerPanel";
 import EventDetailPanel from "./components/EventDetailPanel";
 import api from "@/lib/api";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn, formatDate, roundSessions } from "@/lib/utils";
 import { toStudioLocalDate, formatStudioDate, formatStudioTime, studioNow } from "@/lib/studioLocalDate";
 import { describeBooking, escapeHtml } from "@/lib/booking-info";
@@ -1633,6 +1635,32 @@ function formatTime(dateInput) {
 
 // Header "N today · N/wk" badge: a lesson that fell through with no charge is
 // gone; a charged cancel / charged no-show still counts (it was paid for).
+/** "P" (private / intro) vs "G" (group class) for the per-teacher counts in the day header. */
+const lessonKind = (e) => {
+  const t = e?.extendedProps?.raw?.type;
+  if (t === "private" || t === "trial") return "P";
+  if (t === "lesson") return "G";
+  return null;
+};
+
+/** { [tutorKey]: { p, g } } for the week (Sun–Sat) containing `focusDate`. To-dos and no-charge cancellations don't count. */
+function weekLessonCountsByTutor(events, focusDate) {
+  const map = {};
+  const weekStart = startOfWeekSunday(focusDate);
+  const weekEnd = addDays(weekStart, 7);
+  events.forEach((event) => {
+    const kind = lessonKind(event);
+    if (!kind || !isCountedEvent(event)) return;
+    const d = new Date(event.start);
+    if (d < weekStart || d >= weekEnd) return;
+    const key = event.extendedProps?.tutorKey || "unknown";
+    const row = (map[key] ||= { p: 0, g: 0 });
+    if (kind === "P") row.p += 1;
+    else row.g += 1;
+  });
+  return map;
+}
+
 const isCountedEvent = (e) =>
   !e.extendedProps?.isTodo &&
   !["cancelled_no_charge", "no_show_no_charge"].includes(e.extendedProps?.effectiveStatus);
@@ -2044,6 +2072,88 @@ function deriveTutorsFromEvents(events, passedTutors) {
   return Object.values(seen);
 }
 
+/**
+ * An all-day event (a teacher marked out for the day) fills its whole column, so the day
+ * reads as unavailable instead of as a small chip in the all-day row.
+ *
+ * `interactive` is for a column that belongs to that one teacher (the day view): the
+ * whole column is theirs and nothing can be booked in it, so clicking it opens the event
+ * rather than a new booking. The week view's columns are days shared by every teacher, so
+ * there it only shades and labels — slots stay clickable for the other teachers.
+ * It sits below timed events (z-index 1), so a lesson booked before the to-do stays visible.
+ */
+function AllDayColumnBlock({ event, height, interactive = false, showTeacher = false, stackIndex = 0, onEventClick }) {
+  const accent = event.extendedProps?.color || "var(--studio-primary)";
+  const hatch = `repeating-linear-gradient(45deg, color-mix(in srgb, ${accent} 16%, transparent) 0, color-mix(in srgb, ${accent} 16%, transparent) 6px, transparent 6px, transparent 14px)`;
+  const teacher = event.extendedProps?.tutorName;
+  return (
+    <div
+      {...(interactive ? { "data-event": "true" } : {})}
+      onClick={
+        interactive
+          ? (e) => {
+              e.stopPropagation();
+              onEventClick?.(event.extendedProps?.raw);
+            }
+          : undefined
+      }
+      onMouseEnter={interactive ? (e) => showEventTooltip(e, event.extendedProps || {}) : undefined}
+      onMouseMove={interactive ? (e) => positionTooltip(e) : undefined}
+      onMouseLeave={interactive ? () => hideEventTooltip() : undefined}
+      className={`absolute inset-x-0 top-0 ${interactive ? "cursor-pointer" : "pointer-events-none"}`}
+      style={{
+        height,
+        zIndex: 1,
+        backgroundColor: `color-mix(in srgb, ${accent} 9%, transparent)`,
+        backgroundImage: hatch,
+        borderLeft: `3px solid ${accent}`,
+        borderRight: `1px dashed color-mix(in srgb, ${accent} 40%, transparent)`,
+      }}
+    >
+      <div
+        className={`sticky mx-1.5 flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-semibold shadow-sm ${interactive ? "" : "pointer-events-auto cursor-pointer"}`}
+        style={{
+          top: 8 + stackIndex * 26,
+          marginTop: 8,
+          backgroundColor: `color-mix(in srgb, ${accent} 22%, hsl(var(--card)))`,
+          color: accent,
+        }}
+        onClick={
+          interactive
+            ? undefined
+            : (e) => {
+                e.stopPropagation();
+                onEventClick?.(event.extendedProps?.raw);
+              }
+        }
+      >
+        <span className="truncate" title={`All day · ${event.title}`}>{event.title}</span>
+        {showTeacher && teacher ? <span className="truncate opacity-80">· {teacher}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+/** Only real teacher columns can receive a lesson — not the synthetic "Unassigned" / admin columns. */
+function isAssignableTutorKey(key) {
+  return Boolean(key) && key !== "unknown" && key !== UNASSIGNED_KEY;
+}
+
+/**
+ * Lessons that can be moved to another teacher by dragging: active private,
+ * intro and group-class sessions (a group move is confirmed and affects only that
+ * session). To-dos (can have several assignees) and finished/cancelled lessons
+ * are left alone.
+ */
+function canReassignEventTeacher(event) {
+  const ep = event?.extendedProps || {};
+  if (ep.isTodo) return false;
+  const status = ep.effectiveStatus;
+  if (status === "cancelled_no_charge" || status === "cancelled_charged" || status === "completed") return false;
+  const type = ep.raw?.type;
+  return type === "private" || type === "trial" || type === "lesson";
+}
+
 function TutorDayCalendar({
   visibleStartMins,
   visibleEndHour,
@@ -2057,10 +2167,16 @@ function TutorDayCalendar({
   onEventClick,
   onSlotClick,
   onColumnReorder,
+  onEventReassign,
   customSlotMins = DEFAULT_SLOT_MINS,
   slotAlignMins = 0,
 }) {
   const slotRowHeightPx = TIME_SLOT_ROW_MIN_HEIGHT_PX;
+  // Dragging a lesson card onto another teacher's column reassigns its teacher.
+  const draggedEventRef = useRef(null); // { id, fromKey }
+  const [dropTutorKey, setDropTutorKey] = useState(null);
+  // A drop that needs confirming first (busy teacher and/or a group class).
+  const [pendingMove, setPendingMove] = useState(null); // { raw, tutor, isGroup, warnings }
   const gridPhaseMins =
     visibleGridPhaseMins != null ? visibleGridPhaseMins : slotAlignMins;
   const gridStartMins = firstSlotOnGridAtOrAfter(
@@ -2135,22 +2251,9 @@ function TutorDayCalendar({
     return map;
   }, [dayAllDayEvents, effectiveTutors]);
 
-  // The "N today · N/wk" badge is meant to reflect real bookings/lessons, so
-  // to-dos (extendedProps.isTodo) are excluded from both counts.
-  const weekCountByTutor = useMemo(() => {
-    const map = {};
-    const weekStart = startOfWeekSunday(focusDate);
-    const weekEnd = addDays(weekStart, 7);
-    allEvents.forEach((event) => {
-      if (!isCountedEvent(event)) return;
-      const d = new Date(event.start);
-      if (d >= weekStart && d < weekEnd) {
-        const key = event.extendedProps?.tutorKey || "unknown";
-        map[key] = (map[key] || 0) + 1;
-      }
-    });
-    return map;
-  }, [allEvents, focusDate]);
+  // Per-teacher "X P · Y G" for the week (privates / groups); to-dos are excluded.
+  const weekCountByTutor = useMemo(() => weekLessonCountsByTutor(allEvents, focusDate), [allEvents, focusDate]);
+
 
   const isToday = isSameDate(focusDate, now);
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
@@ -2161,7 +2264,6 @@ function TutorDayCalendar({
         ((nowMinutes - gridStartMins) / customSlotMins) * slotRowHeightPx
       : null;
 
-  const focusDateLabel = focusDate.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 
   const headerScrollRef = useRef(null);
   const bodyScrollRef = useRef(null);
@@ -2180,17 +2282,22 @@ function TutorDayCalendar({
   const colWidth = undefined;
 
   function syncHeaderScroll() {
-    if (headerScrollRef.current && bodyScrollRef.current) {
-      headerScrollRef.current.scrollLeft = bodyScrollRef.current.scrollLeft;
+    if (bodyScrollRef.current) {
+      if (headerScrollRef.current) headerScrollRef.current.scrollLeft = bodyScrollRef.current.scrollLeft;
     }
   }
 
   return (
     <div className="flex flex-col rounded-[12px] border border-border bg-background shadow-sm">
       <div className="sticky top-0 z-40 rounded-t-[12px] border-b border-border bg-background/95 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-background/80">
-        <div className="flex shrink-0 border-b border-border bg-muted/30">
-          <div className="w-[86px] shrink-0 border-r border-border flex items-end pb-2 px-2 bg-muted/30 z-10">
-            <span className="text-[10px] font-medium text-muted-foreground leading-tight">{focusDateLabel}</span>
+        <div className="flex shrink-0 border-b border-border bg-background">
+          <div className="w-[86px] shrink-0 border-r border-border flex flex-col items-center justify-center px-2 py-2 bg-background z-10 text-center">
+            <span className="text-[10px] font-medium text-muted-foreground leading-tight">
+              {focusDate.toLocaleDateString("en-US", { weekday: "short" })}
+            </span>
+            <span className="text-[11px] font-semibold text-foreground leading-tight">
+              {focusDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+            </span>
           </div>
           <div ref={headerScrollRef} className="flex-1 overflow-x-hidden">
             <div className="flex" style={{ minWidth: effectiveTutors.length * MIN_COL_WIDTH }}>
@@ -2199,7 +2306,7 @@ function TutorDayCalendar({
               dayTimedEvents.filter((e) => isCountedEvent(e) && eventBelongsToTutor(e, tutor.key))
                 .length +
               (byTutorAllDay[tutor.key]?.filter(isCountedEvent).length ?? 0);
-            const weekCount = weekCountByTutor[tutor.key] ?? 0;
+            const weekCounts = weekCountByTutor[tutor.key] ?? { p: 0, g: 0 };
             return (
               <div
                 key={tutor.key}
@@ -2238,24 +2345,15 @@ function TutorDayCalendar({
                 }}
               >
                 <div className="flex flex-col items-center min-w-0">
-                  <span className="text-[11px] font-semibold text-foreground truncate max-w-full leading-tight">
+                  <span className="text-[12px] font-medium text-foreground truncate max-w-full leading-tight">
                     {tutor.name || tutor.label || "Unknown"}
                   </span>
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <span
-                      className="text-[10px] font-bold px-1.5 py-px rounded-full"
-                      style={{
-                        backgroundColor: `color-mix(in srgb, ${tutor.color} 15%, transparent)`,
-                        color: tutor.color,
-                      }}
-                    >
-                      {todayCount} today
+                  <div className="mt-1 flex items-center gap-2 text-[11px] leading-none">
+                    <span className="font-medium text-brand">{todayCount} today</span>
+                    <span className="h-3 w-px bg-border" aria-hidden="true" />
+                    <span className="text-muted-foreground" title="This week: private lessons · group classes">
+                      {weekCounts.p} P · {weekCounts.g} G
                     </span>
-                    {weekCount > 0 && (
-                      <span className="text-[10px] text-muted-foreground">
-                        · {weekCount}/wk
-                      </span>
-                    )}
                   </div>
                 </div>
               </div>
@@ -2265,40 +2363,6 @@ function TutorDayCalendar({
           </div>
         </div>
 
-        {/* All-day row (per-tutor all-day events) */}
-        <div className="flex h-10 border-b border-border bg-muted/40">
-          <div className="w-[86px] shrink-0 border-r border-border px-2 py-2 text-[10px] font-medium text-muted-foreground">
-            All day
-          </div>
-          {effectiveTutors.map((tutor, idx) => (
-            <div
-              key={`allday-${tutor.key}`}
-              className="flex-1 px-1.5 py-1"
-              style={{
-                borderRight:
-                  idx < effectiveTutors.length - 1
-                    ? "1px solid hsl(var(--border))"
-                    : "none",
-              }}
-            >
-              {(byTutorAllDay[tutor.key] || []).slice(0, 1).map((event) => (
-                <div
-                  key={event.id}
-                  className="flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold"
-                  style={{
-                    backgroundColor: `color-mix(in srgb, ${event.extendedProps?.color || "var(--studio-primary)"} 28%, hsl(var(--card)))`,
-                    borderLeft: `3px solid ${event.extendedProps?.color || "var(--studio-primary)"}`,
-                    color:
-                      event.extendedProps?.color || "var(--studio-primary)",
-                  }}
-                >
-                  <span className="truncate">{event.title}</span>
-                  <TypeBadge type={event.extendedProps?.eventType} />
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
       </div>
 
       <div className="relative flex">
@@ -2345,7 +2409,66 @@ function TutorDayCalendar({
                   colIdx < effectiveTutors.length - 1
                     ? "1px solid hsl(var(--border))"
                     : "none",
-                backgroundColor: `color-mix(in srgb, ${tutor.color} 3%, hsl(var(--background)))`,
+                backgroundColor:
+                  dropTutorKey === tutor.key
+                    ? `color-mix(in srgb, ${tutor.color} 22%, hsl(var(--background)))`
+                    : `color-mix(in srgb, ${tutor.color} 9%, hsl(var(--background)))`,
+                boxShadow:
+                  dropTutorKey === tutor.key
+                    ? `inset 0 0 0 2px ${tutor.color}`
+                    : undefined,
+              }}
+              onDragOver={(e) => {
+                const drag = draggedEventRef.current;
+                if (!drag || drag.fromKey === tutor.key || !isAssignableTutorKey(tutor.key)) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+              }}
+              onDragEnter={(e) => {
+                const drag = draggedEventRef.current;
+                if (!drag || drag.fromKey === tutor.key || !isAssignableTutorKey(tutor.key)) return;
+                e.preventDefault();
+                setDropTutorKey(tutor.key);
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget)) {
+                  setDropTutorKey((k) => (k === tutor.key ? null : k));
+                }
+              }}
+              onDrop={(e) => {
+                const drag = draggedEventRef.current;
+                draggedEventRef.current = null;
+                setDropTutorKey(null);
+                if (!drag || drag.fromKey === tutor.key || !isAssignableTutorKey(tutor.key)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const moved = dayTimedEvents.find((ev) => String(ev.id) === String(drag.id));
+                if (!moved) return;
+                // Overlap is allowed on the calendar (events stack), but moving a lesson
+                // onto a teacher who is already busy then should be a deliberate choice.
+                const ms = (v) => new Date(v).getTime();
+                const clash = (byTutorTimed[tutor.key] || []).some(
+                  (o) =>
+                    !o.extendedProps?.isTodo &&
+                    ms(o.start) < ms(moved.end) &&
+                    ms(o.end) > ms(moved.start),
+                );
+                // A group class has a roster (and is part of a series): students are not
+                // notified, and only this one session changes teacher.
+                const raw = moved.extendedProps?.raw;
+                const isGroup = raw?.type === "lesson";
+                const warnings = [];
+                if (clash) {
+                  warnings.push(`${tutor.name || "This teacher"} already has an appointment at that time.`);
+                }
+                if (isGroup) {
+                  warnings.push("The enrolled students are not notified of the teacher change.");
+                }
+                if (!warnings.length) {
+                  onEventReassign?.(raw, tutor);
+                  return;
+                }
+                setPendingMove({ raw, tutor, isGroup, warnings });
               }}
               onClick={(e) => {
                 if (e.target.closest("[data-event]")) return;
@@ -2432,6 +2555,20 @@ function TutorDayCalendar({
                   <div
                     key={event.id}
                     data-event="true"
+                    draggable={!!onEventReassign && canReassignEventTeacher(event)}
+                    onDragStart={(e) => {
+                      if (!onEventReassign || !canReassignEventTeacher(event)) {
+                        e.preventDefault();
+                        return;
+                      }
+                      draggedEventRef.current = { id: event.id, fromKey: tutor.key };
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", String(event.id));
+                    }}
+                    onDragEnd={() => {
+                      draggedEventRef.current = null;
+                      setDropTutorKey(null);
+                    }}
                     onClick={(e) => {
                       e.stopPropagation();
                       onEventClick?.(event.extendedProps?.raw);
@@ -2518,6 +2655,16 @@ function TutorDayCalendar({
                   </div>
                 );
               })}
+
+              {(byTutorAllDay[tutor.key] || []).slice(0, 1).map((event) => (
+                <AllDayColumnBlock
+                  key={`allday-col-${event.id}`}
+                  event={event}
+                  height={paddedDayHeight}
+                  interactive
+                  onEventClick={onEventClick}
+                />
+              ))}
             </div>
           ))}
 
@@ -2537,6 +2684,23 @@ function TutorDayCalendar({
           </div>
         )}
       </div>
+      <ConfirmDialog
+        open={!!pendingMove}
+        title={pendingMove?.isGroup ? "Move this class to another teacher?" : "Move this appointment?"}
+        description={
+          pendingMove
+            ? `"${pendingMove.raw?.title || (pendingMove.isGroup ? "This class" : "This appointment")}" will move to ${pendingMove.tutor?.name || "the new teacher"}${pendingMove.isGroup ? " for this session only. The rest of the series is unchanged." : "."}`
+            : ""
+        }
+        warnings={pendingMove?.warnings || []}
+        confirmLabel="Move"
+        onCancel={() => setPendingMove(null)}
+        onConfirm={() => {
+          const move = pendingMove;
+          setPendingMove(null);
+          if (move) onEventReassign?.(move.raw, move.tutor);
+        }}
+      />
     </div>
   );
 }
@@ -3500,6 +3664,24 @@ function CalendarPageInner() {
     setIsLoadingEvents(false);
   }, [rangeStart, rangeEnd]);
 
+  // Drag a lesson onto another teacher's column: change only its teacher.
+  // The server moves teacherID and the one-item teacherIDs together.
+  const handleEventReassign = useCallback(
+    async (raw, tutor) => {
+      const id = raw?._id;
+      if (!id || !tutor?.key) return;
+      const res = await api.put(`/api/calendar/${id}`, { teacherID: tutor.key });
+      if (res.success) {
+        toast.success(`Moved to ${tutor.name || "new teacher"}`);
+      } else {
+        toast.error(res.error || "Couldn't change the teacher for this appointment.");
+      }
+      // Refetch either way so the grid always shows what the server has.
+      fetchCalendarEvents();
+    },
+    [fetchCalendarEvents],
+  );
+
   useEffect(() => {
     fetchCalendarEvents();
   }, [fetchCalendarEvents]);
@@ -3599,6 +3781,13 @@ function CalendarPageInner() {
     }
     return result;
   }, [events, statusFilter, selectedTeacherId]);
+
+  // Total private lessons for the focused week across the teachers on screen — the
+  // same figure as the sum of the "P" counts in the day-view column headers.
+  const weekPrivateTotal = useMemo(() => {
+    const counts = weekLessonCountsByTutor(filteredEvents, focusDate);
+    return Object.values(counts).reduce((t, c) => t + c.p, 0);
+  }, [filteredEvents, focusDate]);
 
   const snappedGridStartMins = slotAlignMins;
 
@@ -3793,7 +3982,19 @@ function CalendarPageInner() {
 
   return (
     <MainLayout
-      title="Calendar"
+      title={
+        <span className="inline-flex items-center gap-3">
+          Calendar
+          {(viewMode === VIEW_MODE.DAY || viewMode === VIEW_MODE.WEEK) && (
+            <span
+              className="rounded-md bg-brand/10 px-2.5 py-1 text-[12px] font-semibold text-brand"
+              title="Private lessons this week"
+            >
+              {weekPrivateTotal} {weekPrivateTotal === 1 ? "Private" : "Privates"}
+            </span>
+          )}
+        </span>
+      }
       subtitle=""
       mainClassName="pt-0 sm:pt-0"
     >
@@ -3803,13 +4004,6 @@ function CalendarPageInner() {
             {/* Row 1: date nav + create (mobile) / full desktop toolbar */}
             <div className="flex items-center justify-between gap-2 lg:gap-3">
               <div className="flex items-center gap-2 min-w-0">
-                <div className="hidden lg:block">
-                  <ViewOptionsDropdown
-                    hideEmptySlots={hideEmptySlots}
-                    setHideEmptySlots={setHideEmptySlots}
-                    goToToday={goToToday}
-                  />
-                </div>
                 <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                   <IconCircleButton ariaLabel="Previous" onClick={() => shiftView(-1)}>
                     <ChevronLeft className="h-4 w-4 text-muted-foreground" />
@@ -4008,6 +4202,7 @@ function CalendarPageInner() {
                       setInstructors((prev) => [...prev].sort(byOrder));
                       api.patch("/api/teacher/reorder", { order: orderedKeys });
                     }}
+                    onEventReassign={handleEventReassign}
                     customSlotMins={customSlotMins}
                     slotAlignMins={snappedGridStartMins}
                   />

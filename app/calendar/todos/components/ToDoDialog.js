@@ -14,12 +14,14 @@ import { Label } from '@/components/ui/label'
 import api from '@/lib/api'
 import { toast } from '@/components/ui/toast'
 import LocationSelector from '@/components/shared/LocationSelector'
+import Switch from '@/components/ui/switch'
 
 const EMPTY_FORM = {
   name: '',
   locationID: [],
   duration: '',
   color: '#6366f1',
+  includeInLessonsTaught: false,
 }
 
 export default function ToDoDialog({ open, onClose, todo, onRefresh }) {
@@ -41,6 +43,7 @@ export default function ToDoDialog({ open, onClose, todo, onRefresh }) {
               : [],
         duration: todo.duration ?? '',
         color: todo.color || '#6366f1',
+        includeInLessonsTaught: todo.includeInLessonsTaught === true,
       })
     } else {
       setForm(EMPTY_FORM)
@@ -68,6 +71,7 @@ export default function ToDoDialog({ open, onClose, todo, onRefresh }) {
         locationID: form.locationID,
         duration: form.duration === '' ? 50 : Number(form.duration),
         color: form.color || undefined,
+        includeInLessonsTaught: form.includeInLessonsTaught === true,
       }
       const result = isEdit
         ? await api.put(`/api/todo/${todo._id}`, payload)
@@ -141,6 +145,24 @@ export default function ToDoDialog({ open, onClose, todo, onRefresh }) {
                 className="font-mono"
               />
             </div>
+          </div>
+
+          <div className="flex items-start justify-between gap-4 rounded-lg border border-border px-3 py-2.5">
+            <div className="flex flex-col gap-0.5">
+              <Label htmlFor="todo-lessons-taught" className="cursor-pointer">
+                Include in Lessons Taught report
+              </Label>
+              <p className="text-[12px] text-muted-foreground">
+                Count each completed {form.name ? `"${form.name}"` : 'to-do'} as a session the teacher taught.
+                Leave off for time blocks that aren&apos;t lessons.
+              </p>
+            </div>
+            <Switch
+              id="todo-lessons-taught"
+              aria-label="Include in Lessons Taught report"
+              checked={form.includeInLessonsTaught}
+              onCheckedChange={(v) => set('includeInLessonsTaught', v)}
+            />
           </div>
 
           <DialogFooter className="pt-2">

@@ -456,6 +456,7 @@ function CustomerFormDialog({ open, onClose, onSaved, initial }) {
 // Remembers search/filters/page/pageSize across back/forward navigation (and
 // reload within the same tab) — see lib/hooks/useListStatePersistence.js.
 const CUSTOMERS_LIST_STATE_KEY = 'customers-list-state'
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
 
 function CustomersPageInner() {
   const router = useRouter()
@@ -479,7 +480,14 @@ function CustomersPageInner() {
   const [currentPage, setCurrentPage] = useState(persisted.currentPage || 1)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
-  const [pageSize, setPageSize] = useState(persisted.pageSize || 10)
+  const [pageSize, setPageSize] = useState(() => {
+    const n = Number(persisted.pageSize)
+    return PAGE_SIZE_OPTIONS.includes(n) ? n : 10
+  })
+  const filterOptionsLoadedRef = useRef(false)
+  const locationsLoadedRef = useRef(false)
+  const teachersLoadedRef = useRef(false)
+  const leadReasonsLoadedRef = useRef(false)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState(null)
@@ -510,7 +518,9 @@ function CustomersPageInner() {
     router.replace(`/settings/users-roles/customers${qs ? `?${qs}` : ''}`, { scroll: false })
   }
 
+  // Lists badge only matters on the Saved lists tab (or after creating a list).
   useEffect(() => {
+    if (view !== 'lists' && savedListsRefreshKey === 0) return undefined
     let cancelled = false
     const loadCount = async () => {
       const params = new URLSearchParams({
@@ -530,9 +540,9 @@ function CustomersPageInner() {
     return () => {
       cancelled = true
     }
-  }, [savedListsRefreshKey])
+  }, [view, savedListsRefreshKey])
 
-  // Names for the Events & Products filter chips — only fetched while such a filter is applied.
+  // Names for the Events & Products filter chips — only when those filters are applied.
   const purchaseOptions = usePurchaseFilterOptions(
     JSON.stringify(filters?.conditions ?? []).includes('purchase.'),
   )
@@ -602,26 +612,64 @@ function CustomersPageInner() {
     }
   }
 
+  // Light lookups used by the table / teacher dropdown — after the customer
+  // list request is in flight so they don't block first paint.
   useEffect(() => {
-    api.get('/api/location?limit=200').then((res) => {
-      if (res.success) setLocations(res.data || [])
-    })
-    api.get('/api/teacher?limit=200&status=active').then((res) => {
-      if (res.success) setTeachers(res.data || [])
-    })
-    api.get('/api/membership?limit=200').then((res) => {
-      if (res.success) setMemberships(res.data || [])
-    })
-    api.get('/api/package?limit=200').then((res) => {
-      if (res.success) setPackages(res.data || [])
-    })
-    api.get('/api/customer/tags').then((res) => {
-      if (res.success) setTagOptions(res.data || [])
-    })
-    api.get('/api/lead-reasons').then((res) => {
-      if (res?.success) setLeadReasons(extractLeadReasonsList(res))
-    })
+    let cancelled = false
+    const run = () => {
+      if (!teachersLoadedRef.current) {
+        teachersLoadedRef.current = true
+        api.get('/api/teacher?limit=200&status=active').then((res) => {
+          if (!cancelled && res.success) setTeachers(res.data || [])
+        })
+      }
+      if (!locationsLoadedRef.current) {
+        locationsLoadedRef.current = true
+        api.get('/api/location?limit=200').then((res) => {
+          if (!cancelled && res.success) setLocations(res.data || [])
+        })
+      }
+      if (!leadReasonsLoadedRef.current) {
+        leadReasonsLoadedRef.current = true
+        api.get('/api/lead-reasons').then((res) => {
+          if (!cancelled && res?.success) setLeadReasons(extractLeadReasonsList(res))
+        })
+      }
+    }
+    const idle =
+      typeof requestIdleCallback === 'function'
+        ? requestIdleCallback(run, { timeout: 1500 })
+        : setTimeout(run, 0)
+    return () => {
+      cancelled = true
+      if (typeof cancelIdleCallback === 'function' && typeof idle === 'number') {
+        cancelIdleCallback(idle)
+      } else clearTimeout(idle)
+    }
   }, [])
+
+  // Memberships / packages / tags are only needed by the filter panel (and chips).
+  const needsFilterCatalogOptions =
+    filterPanelOpen || countAdvancedCustomerFilters(filters) > 0
+
+  useEffect(() => {
+    if (!needsFilterCatalogOptions || filterOptionsLoadedRef.current) return undefined
+    filterOptionsLoadedRef.current = true
+    let cancelled = false
+    Promise.all([
+      api.get('/api/membership?limit=200'),
+      api.get('/api/package?limit=200'),
+      api.get('/api/customer/tags'),
+    ]).then(([memRes, pkgRes, tagRes]) => {
+      if (cancelled) return
+      if (memRes?.success) setMemberships(memRes.data || [])
+      if (pkgRes?.success) setPackages(pkgRes.data || [])
+      if (tagRes?.success) setTagOptions(tagRes.data || [])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [needsFilterCatalogOptions])
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 350)
@@ -648,16 +696,20 @@ function CustomersPageInner() {
     filters,
   })
 
+  const fetchSeqRef = useRef(0)
   const fetchCustomers = useCallback(async () => {
+    const seq = ++fetchSeqRef.current
     setLoading(true)
     const sanitized = sanitizeCustomerFilters({ ...filters, search: debouncedSearch, teacherID: teacherFilter })
-    const params = buildCustomerQueryParams({ page: currentPage, limit: pageSize, filters: sanitized })
+    const safeLimit = PAGE_SIZE_OPTIONS.includes(pageSize) ? pageSize : 10
+    const params = buildCustomerQueryParams({ page: currentPage, limit: safeLimit, filters: sanitized })
     const result = await api.get(`/api/customer?${params}`)
+    if (seq !== fetchSeqRef.current) return
     if (result.success) {
       setCustomers(Array.isArray(result.data) ? result.data : [])
       const t = result.pagination?.total ?? result.total ?? 0
       setTotal(t)
-      setTotalPages(Math.max(1, Math.ceil(t / pageSize)))
+      setTotalPages(Math.max(1, Math.ceil(t / safeLimit)))
     }
     setLoading(false)
   }, [currentPage, debouncedSearch, teacherFilter, filters, pageSize])
@@ -769,13 +821,15 @@ function CustomersPageInner() {
   }
 
   const locationName = (raw) => {
-    const ids = Array.isArray(raw)
-      ? raw.map((l) => String(l?._id ?? l)).filter(Boolean)
-      : raw
-        ? [String(raw?._id ?? raw)]
-        : []
-    if (!ids.length) return '—'
-    const names = ids.map((id) => locations.find((l) => String(l._id) === id)?.name).filter(Boolean)
+    const items = Array.isArray(raw) ? raw : raw ? [raw] : []
+    if (!items.length) return '—'
+    const names = items
+      .map((item) => {
+        if (item && typeof item === 'object' && item.name) return item.name
+        const id = String(item?._id ?? item)
+        return locations.find((l) => String(l._id) === id)?.name
+      })
+      .filter(Boolean)
     if (!names.length) return '—'
     if (names.length <= 2) return names.join(', ')
     return `${names.slice(0, 2).join(', ')} +${names.length - 2}`
@@ -1248,20 +1302,28 @@ function CustomersPageInner() {
           </Table>
         </div>
 
-        {/* Pagination */}
-        {total > 10 && (
+        {/* Pagination — always show when there is a total so page size stays at 10 by default */}
+        {total > 0 && (
           <div className="flex items-center justify-between text-[12px] text-muted-foreground">
             <div className="flex items-center gap-3">
-              <span>{total} customer{total !== 1 ? 's' : ''}</span>
-              <RowsPerPage value={pageSize} onChange={setPageSize} disabled={loading} />
+              <span>
+                {Math.min((currentPage - 1) * pageSize + 1, total)}–
+                {Math.min(currentPage * pageSize, total)} of {total} customer{total !== 1 ? 's' : ''}
+              </span>
+              <RowsPerPage
+                value={PAGE_SIZE_OPTIONS.includes(pageSize) ? pageSize : 10}
+                onChange={setPageSize}
+                options={PAGE_SIZE_OPTIONS}
+                disabled={loading}
+              />
             </div>
             {totalPages > 1 && (
               <div className="flex items-center gap-1">
-                <Button variant="outline" size="sm" disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)} className="h-7 px-2.5 text-[12px]">
+                <Button variant="outline" size="sm" disabled={currentPage <= 1 || loading} onClick={() => setCurrentPage((p) => p - 1)} className="h-7 px-2.5 text-[12px]">
                   Previous
                 </Button>
                 <span className="px-2">Page {currentPage} of {totalPages}</span>
-                <Button variant="outline" size="sm" disabled={currentPage >= totalPages} onClick={() => setCurrentPage((p) => p + 1)} className="h-7 px-2.5 text-[12px]">
+                <Button variant="outline" size="sm" disabled={currentPage >= totalPages || loading} onClick={() => setCurrentPage((p) => p + 1)} className="h-7 px-2.5 text-[12px]">
                   Next
                 </Button>
               </div>

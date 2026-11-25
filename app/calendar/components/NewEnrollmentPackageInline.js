@@ -59,6 +59,7 @@ const BLANK_FORM = {
   packageID: "",
   purchaseDate: todayISO(),
   expiryDays: "",
+  notes: "",
   services: [],
   billingType: "one_time",
   billing: {
@@ -740,6 +741,17 @@ export default function NewEnrollmentPackageInline({
                 setForm((p) => ({ ...p, purchaseDate: e.target.value }))
               }
               className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[12px]"
+            />
+            <label htmlFor="enrollment-notes" className="block text-[11px] font-medium text-muted-foreground">
+              Notes (optional)
+            </label>
+            <textarea
+              id="enrollment-notes"
+              value={form.notes}
+              onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
+              rows={3}
+              placeholder="Anything staff should know about this sale"
+              className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-[12px]"
             />
           </div>
 

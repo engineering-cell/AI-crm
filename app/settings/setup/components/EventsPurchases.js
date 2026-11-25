@@ -631,6 +631,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated, initialCus
   const [purchaseDate, setPurchaseDate] = useState(todayISO())
   // When the event / competition ends. After it passes the purchase completes on its own.
   const [expiryDate, setExpiryDate] = useState('')
+  const [notes, setNotes] = useState('')
 
   // Billing
   const [billingType, setBillingType] = useState('one_time') // one_time | payment_plan | flexible
@@ -663,7 +664,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated, initialCus
     setStep(1)
     setCustomer(initialCustomerID ? { _id: initialCustomerID, name: initialCustomerName || '' } : null)
     setCustomerQuery(''); setEventTypeID(''); setTemplateID('')
-    setName(''); setItems([]); setSaveAsTemplate(false); setPurchaseDate(todayISO())
+    setName(''); setItems([]); setSaveAsTemplate(false); setPurchaseDate(todayISO()); setNotes('')
     setBillingType('one_time'); setCollectNow(true); setPayMethod('cash'); setLinkChannel('email'); setSavedCardID(''); setDeviceID(''); setCheckNumber(''); setCollectDate(todayISO())
     setShortfallMethod('cash'); setWalletAmount(''); setWalletBalance(null)
     setTipEnabled(false); setTipTeacherID(''); setTipAmount('')
@@ -796,6 +797,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated, initialCus
         name: name.trim(),
         purchaseDate: purchaseDate ? dateInputToISO(purchaseDate) : undefined,
         expiryDate: expiryDate || undefined,
+        notes: notes.trim() || undefined,
         lineItems,
         saveAsTemplate,
         templateName: name.trim(),
@@ -975,6 +977,18 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated, initialCus
               <p className="text-xs text-muted-foreground -mb-2">
                 Set the day the event or competition ends: once it passes, every product is checked off and the purchase moves to Completed automatically. You can also change it later from the customer profile.
               </p>
+
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="cep-notes">Notes (optional)</Label>
+                <textarea
+                  id="cep-notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={3}
+                  placeholder="Anything staff should know about this sale"
+                  className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm"
+                />
+              </div>
 
               <LineItemsEditor
                 items={items}

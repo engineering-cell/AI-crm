@@ -13,6 +13,8 @@ import { CalendarDays, ChevronLeft, ChevronRight, ChevronDown, Settings2 } from 
 import AppointmentComposerPanel from "./components/AppointmentComposerPanel";
 import EventDetailPanel from "./components/EventDetailPanel";
 import api from "@/lib/api";
+import { applyGroupColor } from "@/lib/groupColor";
+import { useGroupColor } from "@/lib/hooks/useGroupColor";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn, formatDate, roundSessions } from "@/lib/utils";
@@ -3504,7 +3506,10 @@ function CalendarPageInner() {
   const [nowMarker, setNowMarker] = useState(() => Date.now());
   const now = useMemo(() => new Date(nowMarker), [nowMarker]);
 
-  const [events, setEvents] = useState([]);
+  const [loadedEvents, setEvents] = useState([]);
+  const { groupColor } = useGroupColor();
+  // Applied on the way out, so a colour change repaints what is already on screen.
+  const events = useMemo(() => applyGroupColor(loadedEvents, groupColor), [loadedEvents, groupColor]);
   const [instructors, setInstructors] = useState([]);
   const memberSelectionsRef = useRef({});
   const membershipCoverageRef = useRef(new Set()); // "customerID::serviceCode" for active memberships // appointmentId -> memberIds[]

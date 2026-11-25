@@ -1791,6 +1791,14 @@ export default function MiniStudentPanel({
                                 }
                                 className="h-8 w-full rounded-lg border border-border bg-muted/20 px-3 text-[11px] text-foreground outline-none focus:border-primary"
                               />
+                              <textarea
+                                aria-label="Notes"
+                                value={sellForm.notes}
+                                onChange={(e) => setSellForm((f) => ({ ...f, notes: e.target.value }))}
+                                rows={2}
+                                placeholder="Notes (optional)"
+                                className="w-full resize-y rounded-lg border border-border bg-muted/20 px-3 py-2 text-[11px] text-foreground outline-none focus:border-primary"
+                              />
                               {sellError && (
                                 <p className="text-[10px] text-destructive">
                                   {sellError}

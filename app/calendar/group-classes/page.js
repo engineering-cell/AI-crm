@@ -12,6 +12,8 @@ import api from '@/lib/api'
 import { toast } from '@/components/ui/toast'
 import GroupClassDrawer, { WEEKDAYS } from './components/GroupClassDrawer'
 import WebsiteEmbedDialog from './components/WebsiteEmbedDialog'
+import GroupColorPicker from './components/GroupColorPicker'
+import { useGroupColor } from '@/lib/hooks/useGroupColor'
 
 const todayLocal = () => new Date().toLocaleDateString('en-CA')
 
@@ -86,6 +88,7 @@ function Metric({ icon: Icon, value, label }) {
 }
 
 export default function GroupClassesPage() {
+  const { groupColor, saveGroupColor } = useGroupColor()
   const [lessons, setLessons] = useState([])
   const [schedules, setSchedules] = useState([])
   const [loading, setLoading] = useState(true)
@@ -218,7 +221,8 @@ export default function GroupClassesPage() {
           <div className="overflow-hidden rounded-xl border border-border bg-card">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
               <SearchInput className="w-full sm:w-[260px]" placeholder="Search classes" value={search} onChange={(e) => setSearch(e.target.value)} />
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <GroupColorPicker color={groupColor} onSave={saveGroupColor} />
                 <select
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
@@ -260,7 +264,7 @@ export default function GroupClassesPage() {
                         <TableRow key={lesson._id} className="align-top hover:bg-muted/20">
                           <TableCell className="min-w-[220px] px-4 py-3.5">
                             <div className="flex items-start gap-3">
-                              <span className="mt-0.5 h-8 w-1.5 shrink-0 rounded-full" style={{ background: lesson.color || 'var(--studio-primary)' }} />
+                              <span className="mt-0.5 h-8 w-1.5 shrink-0 rounded-full" style={{ background: groupColor || lesson.color || 'var(--studio-primary)' }} />
                               <div className="min-w-0">
                                 <p className="text-sm font-semibold text-foreground">
                                   {lesson.name}

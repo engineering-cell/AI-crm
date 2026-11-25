@@ -5,6 +5,7 @@ import { comparisonWindows } from '@/lib/hooks/useOwnerDashboardPage'
 import { useOwnerDashboardOverview } from '@/lib/hooks/useAnalyticsOverview'
 import { Panel, PanelHead, Reveal } from './chrome'
 import { PERIOD_OPTIONS } from './PeriodSelect'
+import { rangeCaption } from '@/lib/dashboardRanges'
 
 const OPTIONS = PERIOD_OPTIONS.filter((o) => o.value !== 'custom')
 
@@ -16,8 +17,8 @@ const OPTIONS = PERIOD_OPTIONS.filter((o) => o.value !== 'custom')
  */
 export function useCardData(override, pageData, pageComparisons) {
   const windows = override ? comparisonWindows(override) : null
-  const own = useOwnerDashboardOverview(override ?? 'mtd', { enabled: Boolean(override) })
-  const prev = useOwnerDashboardOverview(windows?.priorPeriod ?? 'mtd', { enabled: Boolean(override), compare: true })
+  const own = useOwnerDashboardOverview(override ?? 'mtd', { enabled: Boolean(override), prior: windows?.priorPeriod, yoy: windows?.priorYear })
+  const prev = useOwnerDashboardOverview(windows?.priorPeriod ?? 'mtd', { enabled: Boolean(override && windows?.priorPeriod), compare: true })
   const ly = useOwnerDashboardOverview(windows?.priorYear ?? 'mtd', { enabled: Boolean(override), compare: true })
   if (!override) return { data: pageData, comparisons: pageComparisons, loading: false, error: null, retry: null }
   return {
@@ -46,7 +47,7 @@ export function PeriodPicker({ title, snapshot, override, setOverride }) {
     <select
       aria-label={`${title} period`}
       value={override === null ? 'page' : String(override)}
-      onChange={(e) => setOverride(e.target.value === 'page' ? null : e.target.value === '30' ? 30 : e.target.value)}
+      onChange={(e) => setOverride(e.target.value === 'page' ? null : /^[0-9]+$/.test(e.target.value) ? Number(e.target.value) : e.target.value)}
       className="h-7 rounded-lg border border-border bg-background px-2 text-[11px] font-semibold text-muted-foreground"
     >
       <option value="page">Page period</option>
@@ -88,12 +89,12 @@ export default function CardFrame({
   return (
     <Reveal delay={delay} className="h-full min-w-0">
       <Panel className={`flex h-full flex-col ${className}`}>
-        <PanelHead tag={tag} title={title} note={note} right={toggle} detailsButton={<>{details ? details(range) : null}{picker}</>} />
+        <PanelHead tag={tag} title={title} note={snapshot || !rangeCaption(range) ? note : <><span>{rangeCaption(range)}</span>{note ? <> · <span>{note}</span></> : null}</>} right={toggle} detailsButton={<>{details ? details(range) : null}{picker}</>} />
         {card.loading ? (
           <Skeleton height={140} />
         ) : card.error ? (
           <p className="mt-6 text-center text-[13px] text-muted-foreground">
-            Couldn&apos;t load this card ·{' '}
+            Couldn&apos;t load ·{' '}
             <button type="button" onClick={card.retry} className="font-semibold text-[var(--studio-primary)] underline">
               Retry
             </button>

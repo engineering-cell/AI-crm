@@ -10,6 +10,7 @@ import api from '@/lib/api'
 import { getCurrentUser, getEffectiveBranch } from '@/lib/auth'
 import { useToast } from '@/components/ui/toast'
 import { cn, formatDateTime } from '@/lib/utils'
+import { callbackInputValue } from '@/lib/location-time'
 import LocationSelector from '@/components/shared/LocationSelector'
 import PhoneNumberInput from '@/components/shared/PhoneNumberInput'
 import { useLeadStages } from '@/lib/lead-stages'
@@ -241,7 +242,7 @@ export default function LeadsDialog({
     }
     const toEditable = (lead) => ({
       ...lead,
-      callbackDate: toDateInputValue(lead.callbackDate),
+      callbackDate: callbackInputValue(lead),
       dateOfBirth: toDateInputValue(lead.dateOfBirth),
       gender: lead.gender || '',
       address: addressFromRecord(lead.address),
@@ -252,13 +253,13 @@ export default function LeadsDialog({
     // — then nothing renders until the fetch below fills it in.
     const found = leads?.find((l) => l._id === initialLeadId)
     setEditingLead(found ? toEditable(found) : null)
-    setSavedCallbackDate(found ? toDateInputValue(found.callbackDate) : '')
+    setSavedCallbackDate(found ? callbackInputValue(found) : '')
     setMode(viewOnly ? 'view' : 'edit')
     // The leads list payload may omit actualReason / members / personal
     // details; fetch the full record to fill them in.
     api.get(`/api/lead/${initialLeadId}`).then((res) => {
       if (!res?.success || !res.data) return
-      if (!found) setSavedCallbackDate(toDateInputValue(res.data.callbackDate))
+      if (!found) setSavedCallbackDate(callbackInputValue(res.data))
       setEditingLead((prev) => {
         if (!prev) return found ? prev : toEditable(res.data)
         if (prev._id !== initialLeadId) return prev

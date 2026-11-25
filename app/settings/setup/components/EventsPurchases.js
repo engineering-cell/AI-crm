@@ -30,13 +30,13 @@ import CheckNumberField from '@/components/payments/CheckNumberField'
 import TerminalDeviceField, { terminalTipPayload } from '@/components/payments/TerminalDeviceField'
 import PaymentMethodPicker from '@/components/payments/PaymentMethodPicker'
 import { SendLinkChannelPicker, sendPaymentLink } from '@/components/payments/SendPaymentLinkMenu'
-import { PAYMENT_METHODS_WITH_SAVED_CARD, SHARE_LINK_METHOD, SHORTFALL_METHODS } from '@/lib/paymentMethods'
+import { PAYMENT_METHODS_WITH_SAVED_CARD, SHARE_LINK_METHOD, SHORTFALL_METHODS, SHORTFALL_METHODS_WITH_TERMINAL } from '@/lib/paymentMethods'
 import WalletShortfallField, { walletShortfall } from '@/components/payments/WalletShortfallField'
 
 // Wallet sits beside the other methods; a balance too small for today's amount asks how to collect the rest.
 const PURCHASE_PAY_METHODS = [...PAYMENT_METHODS_WITH_SAVED_CARD, SHARE_LINK_METHOD]
 // A plan's card/ACH charge takes the whole installment, so only these can share one with the wallet.
-const PLAN_SHORTFALL_METHODS = SHORTFALL_METHODS.filter((m) => ['cash', 'cheque'].includes(m.value))
+const PLAN_SHORTFALL_METHODS = SHORTFALL_METHODS_WITH_TERMINAL.filter((m) => ['cash', 'cheque', 'terminal'].includes(m.value))
 import { useCardProcessor } from '@/app/settings/payments/useCardProcessor'
 
 const money = (n) => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -128,7 +128,7 @@ function ProductDialog({ open, onClose, product, onRefresh }) {
     if (!form.locationID.length) { toast.error('Please select at least one location'); return }
     setSaving(true)
     try {
-      const payload = { locationID: form.locationID, name: form.name.trim(), description: form.description.trim() || undefined, defaultPrice: Number(form.defaultPrice) || 0 }
+      const payload = { locationID: form.locationID, name: form.name.trim(), description: form.description.trim(), defaultPrice: Number(form.defaultPrice) || 0 }
       const res = isEdit ? await api.put(`/api/product/${product._id}`, payload) : await api.post('/api/product', payload)
       if (res.success) { toast.success(isEdit ? 'Product updated' : 'Product created'); onRefresh(); onClose() }
       else toast.error('Failed', { description: res.error })
@@ -260,7 +260,7 @@ function EventTypeDialog({ open, onClose, eventType, onRefresh }) {
     if (!form.locationID.length) { toast.error('Please select at least one location'); return }
     setSaving(true)
     try {
-      const payload = { locationID: form.locationID, name: form.name.trim(), description: form.description.trim() || undefined }
+      const payload = { locationID: form.locationID, name: form.name.trim(), description: form.description.trim() }
       const res = isEdit ? await api.put(`/api/event-type/${eventType._id}`, payload) : await api.post('/api/event-type', payload)
       if (res.success) { toast.success(isEdit ? 'Event type updated' : 'Event type created'); onRefresh(); onClose() }
       else toast.error('Failed', { description: res.error })
@@ -370,13 +370,13 @@ export function EventTypesTab() {
 
 /* ─────────────────────────── Line-item editor (shared) ─────────────────────────── */
 
-const emptyLine = () => ({ productID: '', name: '', quantity: 1, unitPrice: 0, discount: 0, eventDate: '' })
+const emptyLine = () => ({ productID: '', name: '', quantity: 1, unitPrice: 0, discount: 0 })
 const lineTotal = (li) => Math.max(0, (Number(li.quantity) || 0) * (Number(li.unitPrice) || 0) - (Number(li.discount) || 0))
 
 const th = 'px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'
 const numInput = 'h-9 w-[76px] text-right tabular-nums px-2'
 
-function LineItemsEditor({ items, setItems, products, footerExtra = null, showDate = false }) {
+function LineItemsEditor({ items, setItems, products, footerExtra = null }) {
   function update(i, patch) { setItems((prev) => prev.map((li, idx) => idx === i ? { ...li, ...patch } : li)) }
   function pickProduct(i, id) {
     const p = products.find((x) => x._id === id)
@@ -400,13 +400,12 @@ function LineItemsEditor({ items, setItems, products, footerExtra = null, showDa
               <th className={`${th} text-right`}>Price</th>
               <th className={`${th} text-right`}>Discount</th>
               <th className={`${th} text-right`}>Total</th>
-              {showDate && <th className={th}>Event date <span className="font-normal normal-case">(optional)</span></th>}
               <th className={th} />
             </tr>
           </thead>
           <tbody>
             {items.length === 0 ? (
-              <tr><td colSpan={showDate ? 7 : 6} className="px-3 py-6 text-center text-sm text-muted-foreground">No line items yet — add a saved product or a custom item below.</td></tr>
+              <tr><td colSpan={6} className="px-3 py-6 text-center text-sm text-muted-foreground">No line items yet — add a saved product or a custom item below.</td></tr>
             ) : items.map((li, i) => (
               <tr key={i} className="border-t border-border align-middle">
                 <td className="px-3 py-2">
@@ -422,11 +421,6 @@ function LineItemsEditor({ items, setItems, products, footerExtra = null, showDa
                 <td className="px-1.5 py-2"><Input type="number" min="0" step="any" value={li.unitPrice} onChange={(e) => update(i, { unitPrice: e.target.value })} className={numInput} /></td>
                 <td className="px-1.5 py-2"><Input type="number" min="0" step="any" value={li.discount} onChange={(e) => update(i, { discount: e.target.value })} className={numInput} /></td>
                 <td className="px-3 py-2 text-right text-sm font-semibold tabular-nums whitespace-nowrap">{money(lineTotal(li))}</td>
-                {showDate && (
-                  <td className="px-1.5 py-2">
-                    <Input type="datetime-local" value={li.eventDate || ''} onChange={(e) => update(i, { eventDate: e.target.value })} className="h-9 w-[200px]" />
-                  </td>
-                )}
                 <td className="px-1 py-2 text-center">
                   <button type="button" aria-label="Remove line" onClick={() => setItems((prev) => prev.filter((_, idx) => idx !== i))} className="text-muted-foreground hover:text-destructive">
                     <Trash2 className="h-4 w-4" />
@@ -457,6 +451,7 @@ function TemplateDialog({ open, onClose, template, products, eventTypes, onRefre
   const isEdit = Boolean(template)
   const [name, setName] = useState('')
   const [eventTypeID, setEventTypeID] = useState('')
+  const [locationID, setLocationID] = useState([])
   const [items, setItems] = useState([])
   const [saving, setSaving] = useState(false)
 
@@ -464,22 +459,24 @@ function TemplateDialog({ open, onClose, template, products, eventTypes, onRefre
     if (!open) return
     if (template) {
       setName(template.name || '')
+      setLocationID(locIds(template.locationID))
       setEventTypeID(template.eventTypeID?._id || template.eventTypeID || '')
       setItems((template.lineItems || []).map((li) => ({
         productID: li.productID?._id || li.productID || '',
         name: li.name || '', quantity: li.quantity ?? 1, unitPrice: li.unitPrice ?? 0, discount: li.discount ?? 0,
       })))
-    } else { setName(''); setEventTypeID(''); setItems([]) }
+    } else { setName(''); setEventTypeID(''); setLocationID([]); setItems([]) }
   }, [open, template])
 
   async function submit(e) {
     e.preventDefault()
     if (!name.trim()) { toast.error('Template name is required'); return }
+    if (!locationID.length) { toast.error('Please select at least one location'); return }
     const lineItems = items.filter((li) => (li.name || '').trim())
     if (lineItems.length === 0) { toast.error('Add at least one product'); return }
     setSaving(true)
     try {
-      const payload = { name: name.trim(), eventTypeID: eventTypeID || undefined, lineItems }
+      const payload = { locationID, name: name.trim(), eventTypeID: eventTypeID || undefined, lineItems }
       const res = isEdit ? await api.put(`/api/purchase-template/${template._id}`, payload) : await api.post('/api/purchase-template', payload)
       if (res.success) { toast.success(isEdit ? 'Template updated' : 'Template created'); onRefresh(); onClose() }
       else toast.error('Failed', { description: res.error })
@@ -491,6 +488,10 @@ function TemplateDialog({ open, onClose, template, products, eventTypes, onRefre
       <DialogContent>
         <DialogHeader><DialogTitle>{isEdit ? 'Edit Saved Template' : 'Add Saved Template'}</DialogTitle></DialogHeader>
         <form onSubmit={submit} className="flex flex-col gap-4 py-2">
+          <div className="flex flex-col gap-1.5">
+            <Label>Location</Label>
+            <LocationSelector value={locationID} onChange={setLocationID} multiple={true} />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="t-name">Template name</Label>
@@ -979,7 +980,6 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated, initialCus
                 items={items}
                 setItems={setItems}
                 products={products}
-                showDate
                 footerExtra={(
                   <button
                     type="button"
@@ -1053,7 +1053,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated, initialCus
                       onWalletAmountChange={setWalletAmount}
                       shortfallMethod={shortfallMethod}
                       onShortfallMethodChange={setShortfallMethod}
-                      methods={billingType === 'one_time' ? SHORTFALL_METHODS : PLAN_SHORTFALL_METHODS}
+                      methods={billingType === 'one_time' ? SHORTFALL_METHODS_WITH_TERMINAL : PLAN_SHORTFALL_METHODS}
                     />
                   )}
                   {isLink && (
@@ -1070,7 +1070,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated, initialCus
                     </p>
                   )}
                   <TerminalDeviceField
-                    method={payMethod}
+                    method={chargeMethod}
                     locationID={chargeLocation}
                     deviceID={deviceID}
                     onDeviceChange={setDeviceID}

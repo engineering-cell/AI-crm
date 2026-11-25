@@ -295,7 +295,7 @@ function SessionTable({ sessions }) {
         <thead className="bg-muted/40 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           <tr>
             <th className="px-3 py-2">Date</th>
-            <th className="px-3 py-2">Student</th>
+            <th className="px-3 py-2">Student / to-do</th>
             <th className="px-3 py-2 text-right">Lessons</th>
           </tr>
         </thead>

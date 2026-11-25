@@ -171,7 +171,7 @@ export default function ServiceDialog({ open, onClose, service, onRefresh, defau
         serviceName: form.serviceName.trim(),
         serviceCode: form.serviceCode.trim(),
         locationID: form.locationID || undefined,
-        description: form.description.trim() || undefined,
+        description: form.description.trim(),
         color: form.color || undefined,
         price: form.price !== "" ? Number(form.price) : undefined,
         type: form.type,

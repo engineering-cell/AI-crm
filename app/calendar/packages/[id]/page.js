@@ -414,7 +414,8 @@ export default function PackageEditPage() {
       packageName: packageName.trim(),
       locationID: locationID || undefined,
       curriculumID: curriculumID || null,
-      description: description.trim() || undefined,
+      // '' (not undefined) so clearing the field is actually saved — undefined is dropped from the JSON and the old text survives.
+      description: description.trim(),
       sortOrder: sortOrder === '' ? 0 : Number(sortOrder),
       color,
       totalDays: totalDays === '' ? 0 : Number(totalDays),

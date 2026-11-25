@@ -16,7 +16,6 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { cn, formatDateTime, getInitials } from '@/lib/utils'
 import {
-  disconnectConnection,
   isConnectionMuted,
   muteConnection,
   subscribeToConnectionEvents,
@@ -56,12 +55,31 @@ export default function ActiveCallPanel({
   canManage = true,
   mode = 'queue', // 'queue' | 'outbound'
   layerZIndex = 60,
+  /** When set, minimize is controlled by the parent (survives remounts). */
+  minimized: minimizedProp,
+  onMinimizedChange,
 }) {
-  const [minimized, setMinimized] = useState(false)
+  const [localMinimized, setLocalMinimized] = useState(false)
+  const minimizedControlled = typeof minimizedProp === 'boolean'
+  const minimized = minimizedControlled ? minimizedProp : localMinimized
+  const setMinimized = (next) => {
+    const value = Boolean(next)
+    if (!minimizedControlled) setLocalMinimized(value)
+    onMinimizedChange?.(value)
+  }
   const [muted, setMuted] = useState(false)
-  const [callerOnHold, setCallerOnHold] = useState(false)
+  const callerOnHold = callStatus === 'on_hold'
 
   const isConnected = callStatus === 'connected' || callStatus === 'on_hold'
+  // A callback dial can be tucked away while it is still connecting.
+  // Closing the panel must not hang that call up.
+  const dismissPanel = () => {
+    if (mode === 'outbound' || isConnected) {
+      setMinimized(true)
+      return
+    }
+    onClose?.()
+  }
   const { formatted: callDuration } = useCallTimer(isConnected, call?.inProgressAt || call?.claimedAt || call?.initiatedAt)
   useEffect(() => {
     if (!connection) return undefined
@@ -69,15 +87,9 @@ export default function ActiveCallPanel({
     setMuted(isConnectionMuted(connection))
 
     return subscribeToConnectionEvents(connection, {
-      accept: () => {},
       mute: (isMuted) => setMuted(isMuted),
-      // Outbound inbox owns teardown (local vs remote hangup messaging).
-      disconnect: () => {
-        if (mode === 'outbound') return
-        onClose?.()
-      },
     })
-  }, [connection, onClose, mode])
+  }, [connection])
 
   const handleToggleMute = () => {
     const next = !muted
@@ -86,23 +98,16 @@ export default function ActiveCallPanel({
   }
 
   const handleToggleHold = async () => {
-    const next = !callerOnHold
     try {
-      await onHoldChange?.(next)
-      setCallerOnHold(next)
+      await onHoldChange?.(!callerOnHold)
     } catch {
       // parent shows toast
     }
   }
 
   const handleHangUp = () => {
-    // Outbound: parent sets the "ending" guard then disconnects, so we don't
-    // mis-label a CRM hangup as "other party disconnected".
-    if (mode === 'outbound') {
-      onEndCall?.()
-      return
-    }
-    disconnectConnection(connection)
+    // Parent owns disconnect (outbound and queue) so it can set an ending
+    // guard before teardown and avoid a duplicate "caller hung up" toast.
     onEndCall?.()
   }
 
@@ -144,7 +149,7 @@ export default function ActiveCallPanel({
     <div className="fixed inset-0 flex items-end justify-center p-4 sm:items-center sm:p-6" style={{ zIndex: layerZIndex }}>
       <div
         className="absolute inset-0 bg-background/70 backdrop-blur-sm"
-        onClick={isConnected ? undefined : onClose}
+        onClick={dismissPanel}
       />
 
       <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-3xl border border-border bg-card shadow-2xl animate-scale-in">
@@ -182,9 +187,9 @@ export default function ActiveCallPanel({
               </button>
               <button
                 type="button"
-                onClick={isConnected ? () => setMinimized(true) : onClose}
+                onClick={dismissPanel}
                 className="rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white"
-                title={isConnected ? 'Minimize' : 'Close'}
+                title={mode === 'outbound' || isConnected ? 'Minimize' : 'Close'}
               >
                 <X className="h-4 w-4" />
               </button>

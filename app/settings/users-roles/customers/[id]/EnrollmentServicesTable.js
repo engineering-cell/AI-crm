@@ -3,6 +3,7 @@
 import { ChevronDown, Info } from "lucide-react";
 import { formatStudioDate, formatStudioTime } from "@/lib/studioLocalDate";
 import { roundSessions } from "@/lib/utils";
+import { deriveEffectiveStatus } from "@/lib/eventStatus";
 import {
   allocateLessonCoverage,
   bucketForStatus,
@@ -101,7 +102,13 @@ export default function EnrollmentServicesTable({
       })
       .sort((a, b) => new Date(b.startDateTime) - new Date(a.startDateTime));
 
-    const datedCompleted = events.filter((e) => bucketForStatus(e.status) === "completed").length;
+    // Judge every lesson by the SAME end-based status the calendar shows (a lesson that has only
+    // started is still scheduled). Using the raw stored status here while the counts above come
+    // from lessons that have ended made the two disagree, and the gap was booked as an imported
+    // "Sessions Taken" lesson that swallowed the money collected.
+    const datedCompleted = events.filter(
+      (e) => bucketForStatus(deriveEffectiveStatus(e)) === "completed",
+    ).length;
     // A migration's "Sessions Taken" has no dated lesson behind it.
     const untracked = Math.max(0, sessUsed - datedCompleted);
 
@@ -118,7 +125,11 @@ export default function EnrollmentServicesTable({
           funds,
           fullyPaid,
           untracked,
-          lessons: events.map((e) => ({ id: e._id, startDateTime: e.startDateTime, status: e.status })),
+          lessons: events.map((e) => ({
+            id: e._id,
+            startDateTime: e.startDateTime,
+            status: deriveEffectiveStatus(e),
+          })),
         });
 
     // Signed balance: money left after every completed and scheduled lesson. It goes NEGATIVE
@@ -255,7 +266,9 @@ export default function EnrollmentServicesTable({
               {partialScheduled > 0 ? ` + ${partialScheduled} partially paid` : ""}
             </p>
           ) : (
-            <p className="font-semibold">All scheduled lessons are paid</p>
+            <p className="font-semibold">
+              {hasScheduledPaidLessons ? "All scheduled lessons are paid" : "No lessons scheduled"}
+            </p>
           )}
           {completedGap > 0 && (
             <p className="mt-0.5 text-destructive">{money(completedGap)} unpaid for completed lessons</p>

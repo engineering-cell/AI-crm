@@ -397,6 +397,7 @@ export default function DashboardDetailsPage() {
       ? { rows: ownerResult.data?.rows || [], total: ownerResult.data?.total || 0, isLoading: ownerResult.isLoading }
       : { rows: leadsData?.rows || [], total: leadsData?.total || 0, isLoading: leadsLoading }
 
+  const summary = isOwner ? ownerResult.data?.summary || null : null
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1)
   const activeFilterCount = countActiveReportFilters(filters)
   const activeFilterChips = getActiveReportFilterChips(filters, {
@@ -477,6 +478,17 @@ export default function DashboardDetailsPage() {
         }
       />
 
+      {summary?.length > 0 && (
+        <dl className="mt-3 grid gap-x-6 gap-y-1 rounded-xl border border-border bg-card px-4 py-3 text-[12.5px] sm:grid-cols-[auto_1fr]">
+          {summary.map((it) => (
+            <div key={it.label} className="contents">
+              <dt className="font-semibold text-muted-foreground">{it.label}</dt>
+              <dd className="text-foreground">{typeof it.value === 'number' ? it.value.toLocaleString() : it.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
       <div className="mt-3 flex justify-end">
         <button
           type="button"
@@ -510,7 +522,12 @@ export default function DashboardDetailsPage() {
             </TableHeader>
             <TableBody>
               {rows.map((row, i) => (
-                <TableRow key={row._id || row.id || i} className="even:bg-muted/20">
+                <TableRow
+                  key={row._id || row.id || i}
+                  className={`even:bg-muted/20 ${row.customerID ? 'cursor-pointer hover:bg-muted/50' : ''}`}
+                  onClick={row.customerID ? () => window.open(`/settings/users-roles/customers/${row.customerID}`, '_blank') : undefined}
+                  title={row.customerID ? 'Open this student’s account' : undefined}
+                >
                   {request.columns.map((col) => (
                     <TableCell key={col.key} className="whitespace-nowrap text-sm">
                       {formatCell(row, col, reportTimezone)}

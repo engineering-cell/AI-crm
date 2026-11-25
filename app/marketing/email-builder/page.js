@@ -7,11 +7,13 @@ import { Tabs } from '@/components/ui/tabs'
 import EmailTemplatesTab from './components/EmailTemplatesTab'
 import EmailBuilderTab from './components/EmailBuilderTab'
 import EmailBulkCreateTab from './components/EmailBulkCreateTab'
+import EmailAnalyticsTab from './components/EmailAnalyticsTab'
 import GlobalLoader from '@/components/shared/GlobalLoader'
 
 function resolveEmailView(raw) {
   if (raw === 'builder') return 'builder'
   if (raw === 'bulk') return 'bulk'
+  if (raw === 'analytics') return 'analytics'
   return 'templates'
 }
 
@@ -54,6 +56,7 @@ function EmailsPageInner() {
               setActiveTab('templates')
             }}
           />
+          <EmailAnalyticsTab />
         </Tabs>
       </div>
     </MainLayout>

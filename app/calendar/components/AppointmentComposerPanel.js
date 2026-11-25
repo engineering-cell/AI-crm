@@ -2582,6 +2582,24 @@ export default function AppointmentComposerPanel({
     };
   }, [form.customer_id, activeTab]);
 
+  // Intro-type services are normally booked from the paid-intro option. But an
+  // imported (or manually enrolled) intro lives as enrollment credit, which that
+  // option never sees — so the student could never be booked at all. Offer an
+  // intro service on the Appointment tab only when THIS student has an active
+  // enrollment with sessions left on it; booking then draws that credit down.
+  const customerIntroCredit = useMemo(() => {
+    const codes = new Set();
+    for (const e of enrollments[form.customer_id] || []) {
+      if (e.status !== "active" || e.package?.status === "cancelled") continue;
+      for (const svc of e.package?.services ?? []) {
+        if (svc.sessionsRemaining > 0 && svc.serviceCode) codes.add(svc.serviceCode);
+      }
+    }
+    return codes;
+  }, [enrollments, form.customer_id]);
+  const isAppointmentService = (s) =>
+    !s.type || s.type === "private" || (s.type === "intro" && customerIntroCredit.has(s.serviceCode));
+
   const SERVICE_TYPE_MAP = {
     Appointment: "private",
     "Group Class": "group",
@@ -2592,10 +2610,10 @@ export default function AppointmentComposerPanel({
     const typeFilter = SERVICE_TYPE_MAP[activeTab];
     return allServices
       .filter((s) => {
-        // Intros are booked from the paid-intro option, not this list. Offering
-        // them here books a normal lesson and drops the purchase already paid.
-        if (activeTab === "Appointment")
-          return !s.type || s.type === "private";
+        // Intros are booked from the paid-intro option, not this list (offering
+        // them here would book a normal lesson and drop a paid purchase) — except
+        // an intro the student holds as enrollment credit; see isAppointmentService.
+        if (activeTab === "Appointment") return isAppointmentService(s);
         return !typeFilter || s.type === typeFilter;
       })
       .map((s) => ({
@@ -2603,7 +2621,7 @@ export default function AppointmentComposerPanel({
         label: s.serviceCode || s.serviceName,
       }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allServices, activeTab]);
+  }, [allServices, activeTab, customerIntroCredit]);
 
   const suggestedAmount = useMemo(() => {
     if (!form.service_id) return null;
@@ -3353,8 +3371,9 @@ export default function AppointmentComposerPanel({
 
   const privateServices = useMemo(
     () =>
-      allServices.filter((s) => !s.type || s.type === "private"),
-    [allServices],
+      allServices.filter(isAppointmentService),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allServices, customerIntroCredit],
   );
 
   const groupServices = useMemo(

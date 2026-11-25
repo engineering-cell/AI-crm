@@ -7,10 +7,12 @@ import { Cell, DataTable, Row, StackedCompare } from '../viz'
 
 const STUDENT_COLUMNS = [
   { key: 'name', label: 'Name' },
-  { key: 'email', label: 'Email' },
   { key: 'phoneNumber', label: 'Phone' },
   { key: 'studio', label: 'Studio' },
-  { key: 'booked', label: 'Booked' },
+  { key: 'lastLessonDate', label: 'Last lesson', format: (v) => (v ? new Date(v).toISOString().slice(0, 10) : '—') },
+  { key: 'lastInstructor', label: 'Last instructor' },
+  { key: 'daysSinceLastLesson', label: 'Days since last lesson' },
+  { key: 'lessonsLeft', label: 'Lessons left on package' },
 ]
 
 const BOOKED_COLOR = 'var(--studio-primary)'
@@ -60,13 +62,13 @@ export default function StudentHealthSection({ data, comparisons, rangeDays }) {
         <CardFrame
           {...frame}
           title="R-24 Active students: booked vs not booked"
-          snapshot="Now"
+          snapshot="Today"
           note={
             totals
               ? `${num(totals.booked)} booked + ${num(totals.notBooked)} not booked = ${num(totals.active)} active · ${Number(totals.bookedPct).toFixed(1)}% booked`
               : null
           }
-          details={(r) => <DetailsButton title="Active Students — full details" metric="studentHealth" rangeDays={r} columns={STUDENT_COLUMNS} />}
+          details={(r) => <DetailsButton title="Active students not booked — call list" metric="studentHealth" rangeDays={r} columns={STUDENT_COLUMNS} />}
         >
           {(d) => {
             const perStudio = bySize(d.studentHealth)
@@ -91,7 +93,7 @@ export default function StudentHealthSection({ data, comparisons, rangeDays }) {
                 </div>
               </>
             ) : (
-              <Empty message="No data for this period" height={200} />
+              <Empty message="No data for this range" height={200} />
             )
           }}
         </CardFrame>
@@ -118,7 +120,7 @@ export default function StudentHealthSection({ data, comparisons, rangeDays }) {
                 ))}
               </DataTable>
             ) : (
-              <Empty message="No data for this period" height={160} />
+              <Empty message="No data for this range" height={160} />
             )
           }}
         </CardFrame>

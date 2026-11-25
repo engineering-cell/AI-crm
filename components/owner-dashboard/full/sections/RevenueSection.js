@@ -4,7 +4,7 @@ import { useState } from 'react'
 import DonutChart from '@/components/dashboard/widgets/DonutChart'
 import DetailsButton from '@/components/owner-dashboard/widgets/DetailsButton'
 import CardFrame from '../CardFrame'
-import { Emph, Empty, SectionHead, Segmented, moneyShort, num } from '../chrome'
+import { Emph, Empty, SectionHead, Segmented, moneyShort, num, moneyExact } from '../chrome'
 import { DrillAccordion, Fill, MixBars, RankedBars, TrendArea } from '../viz'
 import { formatDate } from '@/lib/utils'
 
@@ -19,12 +19,20 @@ const SALES_COLUMNS = [
   { key: 'amount', label: 'Net sales', format: moneyShort },
 ]
 
+// R-04 Details: one row per open payment plan with its unpaid installments, exact to the cent. Click a row to open the student's account. The total equals the card.
 const BALANCE_COLUMNS = [
   { key: 'customer', label: 'Customer' },
   { key: 'studio', label: 'Studio' },
-  { key: 'source', label: 'Source' },
-  { key: 'name', label: 'Package / Membership' },
-  { key: 'dueAmount', label: 'Due', format: moneyShort },
+  { key: 'product', label: 'Product' },
+  { key: 'planTotal', label: 'Plan total', format: moneyExact },
+  { key: 'paid', label: 'Paid', format: moneyExact },
+  { key: 'owed', label: 'Owed', format: moneyExact },
+  { key: 'daysOverdue', label: 'Days overdue' },
+  {
+    key: 'installments',
+    label: 'Due dates',
+    format: (v) => (Array.isArray(v) ? v.map((i) => `${String(i.dueDate).slice(0, 10)} ${moneyExact(i.amount)}`).join(' · ') : '—'),
+  },
 ]
 
 const TREND_OPTIONS = [
@@ -54,7 +62,7 @@ function ByStudio({ d }) {
       <RankedBars labelWidth={210} rows={rows.map((r) => ({ label: r.location, value: r.revenue }))} valueFormatter={moneyShort} />
     </div>
   ) : (
-    <Empty message="No data for this period" height={160} />
+    <Empty message="No data for this range" height={160} />
   )
 }
 
@@ -66,7 +74,7 @@ function ByProduct({ d }) {
       <DrillAccordion items={product.accordion} />
     </div>
   ) : (
-    <Empty message="No data for this period" height={220} />
+    <Empty message="No data for this range" height={220} />
   )
 }
 
@@ -77,7 +85,7 @@ function Trend({ d, grain }) {
       <TrendArea data={trend[grain]} xKey="label" yKey="value" height="100%" seriesName="Net sales" valueFormatter={(v) => `$${(v / 1e6).toFixed(2)}M`} gradientId="odRevenueTrend" />
     </Fill>
   ) : (
-    <Empty message="No data for this period" height={180} />
+    <Empty message="No data for this range" height={180} />
   )
 }
 
@@ -138,13 +146,13 @@ export default function RevenueSection({ data, comparisons, rangeDays }) {
           {...frame}
           delay={2}
           title="R-04 Outstanding balances"
-          snapshot="As of now"
-          details={(r) => <DetailsButton title="Outstanding Balances — full details" metric="outstandingBalances" rangeDays={r} columns={BALANCE_COLUMNS} />}
+          snapshot="Today"
+          details={(r) => <DetailsButton title="Outstanding Balances — full details" metric="paymentPlans" rangeDays={r} columns={BALANCE_COLUMNS} />}
         >
           {() => (
             <>
               <p className="mt-3 text-[30px] font-bold leading-none tabular-nums text-[var(--studio-primary)]">
-                {moneyShort(plans?.total ?? revenue?.totalOutstanding ?? 0)}
+                {moneyExact(plans?.total ?? revenue?.totalOutstanding ?? 0)}
               </p>
               <p className="mb-3 mt-1 text-[13px] text-muted-foreground">
                 {plans ? (
@@ -163,12 +171,12 @@ export default function RevenueSection({ data, comparisons, rangeDays }) {
                   rows={ageing.map((b) => ({
                     label: b.bucket,
                     pct: ageingTotal ? Math.round((b.amount / ageingTotal) * 100) : 0,
-                    value: moneyShort(b.amount),
+                    value: moneyExact(b.amount),
                     color: b.bucket.startsWith('90+') ? 'hsl(var(--destructive))' : b.bucket === 'Not yet due' ? '#E87FB0' : undefined,
                   }))}
                 />
               ) : (
-                <Empty message="No data for this period" height={100} />
+                <Empty message="No data for this range" height={100} />
               )}
             </>
           )}

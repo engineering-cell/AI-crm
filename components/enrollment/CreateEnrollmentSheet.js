@@ -174,6 +174,7 @@ export default function CreateEnrollmentSheet({
       label: payload?.label?.trim() || undefined,
       expiryDays: payload.expiryDays ? Number(payload.expiryDays) : undefined,
       enrollmentID,
+      notes: payload.notes?.trim() || undefined,
       services: (payload.services || []).map((s) => ({
         serviceCode: s.serviceCode,
         serviceName: s.serviceName,

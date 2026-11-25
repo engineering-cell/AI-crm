@@ -58,6 +58,7 @@ import AutopayControl from "@/components/payments/AutopayControl";
 import PayInstallmentDialog from "@/components/payments/PayInstallmentDialog";
 import PaymentDueCard from "@/components/payments/PaymentDueCard";
 import api from "@/lib/api";
+import { saleNotes } from "@/lib/saleNotes";
 import { hasPermission } from "@/lib/permissions";
 import { deriveEffectiveStatus } from "@/lib/eventStatus";
 import { resolveLocationID } from "@/app/settings/payments/clover/useCloverConnection";
@@ -4414,6 +4415,12 @@ function EnrollmentsTab({
                       />
                     )}
 
+                    {cp?.notes && (
+                      <p className="mt-4 whitespace-pre-wrap text-[12px] text-muted-foreground">
+                        Note: {cp.notes}
+                      </p>
+                    )}
+
                     <PaymentTimeline
                       customerID={customerID}
                       enrollmentID={String(enr._id)}
@@ -7291,7 +7298,22 @@ function NotesTab({ customer, onUpdated }) {
   const [pinningId, setPinningId] = useState(null);
   const toast = useToast();
 
-  const notes = [...(customer.notes || [])].sort((a, b) => {
+  const [fromSales, setFromSales] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    Promise.all([
+      api.get(`/api/enrollment?customerID=${customer._id}&limit=500`),
+      api.get(`/api/purchase?customerID=${customer._id}&limit=500`),
+    ]).then(([enr, pur]) => {
+      if (!alive) return;
+      setFromSales(saleNotes(enr.success ? enr.data || [] : [], pur.success ? pur.data || [] : []));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [customer._id]);
+
+  const notes = [...(customer.notes || []), ...fromSales].sort((a, b) => {
     if (a.isPinned && !b.isPinned) return -1;
     if (!a.isPinned && b.isPinned) return 1;
     return new Date(b.createdAt) - new Date(a.createdAt);
@@ -7363,9 +7385,10 @@ function NotesTab({ customer, onUpdated }) {
               className={`rounded-xl border bg-card px-4 py-3.5 ${note.isPinned ? "border-primary/30 bg-primary/5" : "border-border"}`}
             >
               <div className="flex items-start justify-between gap-3">
-                <p className="text-[13px] text-foreground leading-relaxed flex-1">
+                <p className="text-[13px] text-foreground leading-relaxed flex-1 whitespace-pre-wrap">
                   {note.text}
                 </p>
+                {!note.source && (
                 <div className="flex items-center gap-1 shrink-0">
                   <Button
                     variant="ghost"
@@ -7390,8 +7413,10 @@ function NotesTab({ customer, onUpdated }) {
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
+                )}
               </div>
               <p className="text-[11px] text-muted-foreground mt-1.5">
+                {note.source ? `${note.source} · ` : ""}
                 {formatDate(note.createdAt)}
               </p>
             </div>

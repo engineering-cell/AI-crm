@@ -2855,6 +2855,7 @@ export default function AppointmentComposerPanel({
       customerID,
       packageID: payload.packageID,
       enrollmentID,
+      notes: payload.notes?.trim() || undefined,
       services: (payload.services || []).map((s) => ({
         serviceCode: s.serviceCode,
         serviceName: s.serviceName,

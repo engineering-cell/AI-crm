@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  ...(process.env.LOCAL_CLONE_FRONTEND === 'true' ? { distDir: '.next-clone' } : {}),
   experimental: {
     agentUpgrade: 'security',
     // Next 16 turns this on by default. The on-disk Turbopack cache under

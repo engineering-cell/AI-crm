@@ -3537,6 +3537,14 @@ function CalendarPageInner() {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [slotSelection, setSlotSelection] = useState(null);
   const [hideEmptySlots, setHideEmptySlots] = useState(false);
+  // Every way of opening the booking form goes through here, so the teacher being
+  // filtered on is filled in. A clicked teacher column or lesson still wins.
+  // Read at click time: changing the filter later must not reset an open form.
+  const openComposer = (slot = {}) => {
+    setSlotSelection({ ...slot, instructorId: slot.instructorId || selectedTeacherId || undefined });
+    setSelectedEvent(null);
+    setIsAppointmentPanelOpen(true);
+  };
   const [customSlotMins, setCustomSlotMins] = useState(() => {
     return readCachedSlotMins() ?? DEFAULT_SLOT_MINS;
   });
@@ -4085,7 +4093,7 @@ function CalendarPageInner() {
 
                 <button
                   type="button"
-                  onClick={() => setIsAppointmentPanelOpen(true)}
+                  onClick={() => openComposer()}
                   className="h-8 rounded-[20px] bg-brand px-4 text-[11px] font-bold text-brand-foreground hover:bg-brand-dark active:scale-[0.98] transition-all shrink-0"
                 >
                   + Create
@@ -4094,7 +4102,7 @@ function CalendarPageInner() {
 
               <button
                 type="button"
-                onClick={() => setIsAppointmentPanelOpen(true)}
+                onClick={() => openComposer()}
                 className="lg:hidden h-8 rounded-[20px] bg-brand px-3 text-[11px] font-bold text-brand-foreground hover:bg-brand-dark active:scale-[0.98] transition-all shrink-0"
               >
                 + Create
@@ -4193,11 +4201,7 @@ function CalendarPageInner() {
                       setSelectedEvent(raw);
                       setIsAppointmentPanelOpen(false);
                     }}
-                    onSlotClick={({ date, time, instructorId }) => {
-                      setSlotSelection({ date, time, instructorId });
-                      setSelectedEvent(null);
-                      setIsAppointmentPanelOpen(true);
-                    }}
+                    onSlotClick={openComposer}
                     onColumnReorder={(orderedKeys) => {
                       const orderMap = new Map(orderedKeys.map((k, i) => [k, i]));
                       const byOrder = (a, b) => (orderMap.get(a.key) ?? 999) - (orderMap.get(b.key) ?? 999);
@@ -4224,11 +4228,7 @@ function CalendarPageInner() {
                       setSelectedEvent(raw);
                       setIsAppointmentPanelOpen(false);
                     }}
-                    onSlotClick={({ date, time }) => {
-                      setSlotSelection({ date, time });
-                      setSelectedEvent(null);
-                      setIsAppointmentPanelOpen(true);
-                    }}
+                    onSlotClick={openComposer}
                     customSlotMins={customSlotMins}
                     slotAlignMins={snappedGridStartMins}
                   />
@@ -4296,9 +4296,7 @@ function CalendarPageInner() {
                       dateClick={(arg) => {
                         const clickedDate = arg.dateStr?.slice(0, 10) ?? "";
                         const clickedTime = arg.dateStr?.slice(11, 16) ?? "";
-                        setSlotSelection({ date: clickedDate, time: clickedTime });
-                        setSelectedEvent(null);
-                        setIsAppointmentPanelOpen(true);
+                        openComposer({ date: clickedDate, time: clickedTime });
                       }}
                       navLinkDayClick={(date) =>
                         switchToMode(VIEW_MODE.DAY, date)

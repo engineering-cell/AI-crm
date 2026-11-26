@@ -6,6 +6,7 @@ import SearchableSelect from '@/components/ui/searchable-select'
 import NewEnrollmentPackageInline, { enrollmentLinkTarget } from '@/app/calendar/components/NewEnrollmentPackageInline'
 import AssignMembershipForm from '@/components/membership/AssignMembershipForm'
 import { sendPaymentLink } from '@/components/payments/SendPaymentLinkMenu'
+import { turnOnAutopay } from '@/components/payments/AutopayOption'
 import api from '@/lib/api'
 import { useToast } from '@/components/ui/toast'
 import { nameWithMembers } from '@/lib/utils'
@@ -320,6 +321,11 @@ export default function CreateEnrollmentSheet({
       checkoutUrl = payRes.data?.checkoutUrl || null
     }
 
+    // Only reached once today's payment went through (a failure returns above).
+    if (payload.billing?.autopayCardID && addRes.data?.paymentPlan?._id) {
+      await turnOnAutopay(`/api/payment-plan/${addRes.data.paymentPlan._id}/autopay`, payload.billing.autopayCardID)
+    }
+
     // Sent here, not by the form: behind an agreement gate this runs only once it's signed.
     const linkChannel = payload.billing?.sendLinkChannel
     const linkTarget = linkChannel && enrollmentLinkTarget(payload, enrollmentID, addRes.data?.paymentPlan)
@@ -553,7 +559,7 @@ export default function CreateEnrollmentSheet({
           {mode !== 'membership' ? (
             <>
               <div className="rounded-xl border border-border bg-card p-3 mb-0">
-                <p className="text-[11px] font-medium text-muted-foreground mb-1">Student</p>
+                <p className="text-[12px] font-semibold text-foreground mb-1">Student</p>
                 {fixedCustomerID ? (
                   <p className="text-[12px] font-medium text-foreground truncate">
                     {selectedCustomerLabel || 'Selected student'}
@@ -592,7 +598,7 @@ export default function CreateEnrollmentSheet({
             <>
               {!fixedCustomerID && (
                 <div className="rounded-xl border border-border bg-card p-3 mb-4">
-                  <p className="text-[11px] font-medium text-muted-foreground mb-1">Student</p>
+                  <p className="text-[12px] font-semibold text-foreground mb-1">Student</p>
                   <SearchableSelect
                     value={selectedCustomerID}
                     onChange={(v) => setSelectedCustomerID(v)}

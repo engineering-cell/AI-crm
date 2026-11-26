@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "@/components/ui/toast";
+import { turnOnAutopay } from "@/components/payments/AutopayOption";
 import { getEffectiveBranch } from "@/lib/auth";
 import { studioWallTimeToUtcISO } from "@/lib/studio-time";
 import { validateRecurrence } from "@/lib/recurrence";
@@ -2793,7 +2794,7 @@ export default function AppointmentComposerPanel({
       const firstPending = (plan?.installments || []).findIndex((i) => i.status === "pending");
       if (!plan || firstPending === -1) {
         console.error("Initial installment not collected: no pending plan found", { enrollmentID, plans });
-        return null;
+        return false;
       }
       const payRes = await api.post(`/api/payment-plan/${plan._id}/pay-installment`, {
         installmentIndex: firstPending,
@@ -2806,7 +2807,7 @@ export default function AppointmentComposerPanel({
       });
       if (!payRes.success) {
         reportFailure(payRes);
-        return null;
+        return false;
       }
       return payRes.data?.checkoutUrl || null;
     }
@@ -2826,7 +2827,7 @@ export default function AppointmentComposerPanel({
       });
       if (!payRes.success) {
         reportFailure(payRes);
-        return null;
+        return false;
       }
       return payRes.data?.checkoutUrl || null;
     }
@@ -2921,10 +2922,17 @@ export default function AppointmentComposerPanel({
     });
     if (!addRes.success) return null;
 
-    const checkoutUrl =
+    // false = today's payment failed; a string = hosted checkout to open.
+    const initial =
       payload.billingType === "one_time"
         ? addRes.data?.checkoutUrl || null
         : await recordInitialPayment(customerID, enrollmentID, payload);
+    const checkoutUrl = initial || null;
+
+    // Not after a failed payment: autopay would charge it again overnight.
+    if (initial !== false && payload.billing?.autopayCardID && addRes.data?.paymentPlan?._id) {
+      await turnOnAutopay(`/api/payment-plan/${addRes.data.paymentPlan._id}/autopay`, payload.billing.autopayCardID);
+    }
 
     const linkChannel = payload.billing?.sendLinkChannel;
     const linkTarget = linkChannel && enrollmentLinkTarget(payload, enrollmentID, addRes.data?.paymentPlan);

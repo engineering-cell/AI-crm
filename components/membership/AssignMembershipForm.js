@@ -10,7 +10,9 @@ import { Label } from '@/components/ui/label'
 import { useCardProcessor } from '@/app/settings/payments/useCardProcessor'
 import { openCheckoutTab, navigateCheckoutTab, closeCheckoutTab, CHECKOUT_TOAST } from '@/lib/clover'
 
-import { NO_DEVICE_PAYMENT_METHODS, SHARE_LINK_METHOD, SHORTFALL_METHODS } from '@/lib/paymentMethods'
+import { NO_DEVICE_PAYMENT_METHODS, SAVED_CARD_METHOD, SHARE_LINK_METHOD, SHORTFALL_METHODS } from '@/lib/paymentMethods'
+import SavedCardField from '@/components/payments/SavedCardField'
+import AutopayOption, { turnOnAutopay } from '@/components/payments/AutopayOption'
 import WalletShortfallField, { walletShortfall } from '@/components/payments/WalletShortfallField'
 import PaymentMethodPicker from '@/components/payments/PaymentMethodPicker'
 import CheckNumberField from '@/components/payments/CheckNumberField'
@@ -19,7 +21,8 @@ import { dateInputToISO, todayDateInput } from '@/lib/studioLocalDate'
 import { formatDate } from '@/lib/utils'
 
 // Wallet sits beside the other methods; a balance too small asks how to collect the rest.
-const MEMBERSHIP_METHODS = [...NO_DEVICE_PAYMENT_METHODS, SHARE_LINK_METHOD]
+// POST /api/customer-membership charges the saved card itself.
+const MEMBERSHIP_METHODS = [...NO_DEVICE_PAYMENT_METHODS, SAVED_CARD_METHOD, SHARE_LINK_METHOD]
 // A schedule's card charge takes the whole installment, so only these can share one with the wallet.
 const PLAN_SHORTFALL_METHODS = SHORTFALL_METHODS.filter((m) => ['cash', 'cheque'].includes(m.value))
 
@@ -42,6 +45,11 @@ export default function AssignMembershipForm({ customerID, locationID, onSuccess
   const [linkChannel, setLinkChannel] = useState('email')
   const isLink = method === SHARE_LINK_METHOD.value
   const [checkNumber, setCheckNumber] = useState('')
+  const [savedCardID, setSavedCardID] = useState('')
+  // A card belongs to one customer; never carry it over to the next.
+  const [autopayOn, setAutopayOn] = useState(false)
+  const [autopayCardID, setAutopayCardID] = useState('')
+  useEffect(() => { setSavedCardID(''); setAutopayOn(false); setAutopayCardID('') }, [customerID])
   // Flexible billing — same "initial payment + future payments" builder as
   // enrollments/events so staff see one consistent flow everywhere.
   const [flexInitialAmount, setFlexInitialAmount] = useState('0')
@@ -127,6 +135,16 @@ export default function AssignMembershipForm({ customerID, locationID, onSuccess
     (billingType === 'one_time' || collectingFlexInitial) && remaining > 0 && chargeMethod === 'card' && cloverReady
   const cloverNotConnected =
     (billingType === 'one_time' || collectingFlexInitial) && remaining > 0 && chargeMethod === 'card' && !cloverReady
+
+  const bySavedCard = chargeMethod === SAVED_CARD_METHOD.value && collectToday > 0
+  const savedCardNotSelected = bySavedCard && !savedCardID
+
+  // Autopay covers renewals and a schedule's installments. Not offered while the first
+  // installment goes out as a payment link: it could be charged while they are paying.
+  const hasFuturePayments = billingType === 'flexible' && flexFuturePayments.some((c) => Number(c.amount) > 0)
+  const renews = Boolean(selected?.autoRenew)
+  const autopayAvailable = price > 0 && (renews || hasFuturePayments) && !(isLink && collectingFlexInitial)
+  const autopayNotSelected = autopayAvailable && autopayOn && !autopayCardID
 
   // Adding/removing a row (or changing the initial payment) changes how many
   // ways the remaining balance splits, so re-spread it evenly across all rows
@@ -260,6 +278,7 @@ export default function AssignMembershipForm({ customerID, locationID, onSuccess
       if (flexInitialAmountN > 0) billing.collectNow = collectInitialNow && !isLink
     }
     if (!isLink) billing.collectDate = dateInputToISO(paymentDate)
+    if (bySavedCard) billing.savedCardID = savedCardID
 
     const checkoutTab = payWithClover ? openCheckoutTab() : null
     setSubmitting(true)
@@ -278,7 +297,11 @@ export default function AssignMembershipForm({ customerID, locationID, onSuccess
           toast.success(CHECKOUT_TOAST)
         } else {
           closeCheckoutTab(checkoutTab)
-          toast.success('Membership assigned')
+          toast.success(result.data?.pending ? 'Card charged — confirming with Stripe' : 'Membership assigned')
+        }
+        const newID = result.data?.customerMembership?._id
+        if (autopayAvailable && autopayOn && newID) {
+          await turnOnAutopay(`/api/customer-membership/${newID}/autopay`, autopayCardID)
         }
         if (linkContractID) {
           api.patch(`/api/agreement-session/${linkContractID}/link-payment`, {
@@ -342,7 +365,7 @@ export default function AssignMembershipForm({ customerID, locationID, onSuccess
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-1.5">
-        <Label>Membership *</Label>
+        <Label className="font-semibold">Membership *</Label>
         <select
           value={membershipID}
           onChange={(e) => setMembershipID(e.target.value)}
@@ -381,7 +404,7 @@ export default function AssignMembershipForm({ customerID, locationID, onSuccess
       )}
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="am-purchase-date">Purchase date</Label>
+        <Label htmlFor="am-purchase-date" className="font-semibold">Purchase date</Label>
         <Input id="am-purchase-date" type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} className="h-9 w-[180px]" />
         {periodEnd && (
           <p className={`text-[11px] ${periodEnded ? 'text-warning' : 'text-muted-foreground'}`}>
@@ -395,7 +418,7 @@ export default function AssignMembershipForm({ customerID, locationID, onSuccess
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label>Billing</Label>
+        <Label className="font-semibold">Billing</Label>
         <div className="inline-flex rounded-lg border border-border bg-background p-0.5 w-fit">
           {[
             { v: 'one_time', label: 'One-time' },
@@ -432,10 +455,12 @@ export default function AssignMembershipForm({ customerID, locationID, onSuccess
                 onShortfallMethodChange={setShortfallMethod}
               />
               <CheckNumberField method={chargeMethod} checkNumber={checkNumber} onChange={setCheckNumber} />
+              <SavedCardField method={method} locationID={locationID} customerID={customerID} cardToken={savedCardID} onCardChange={setSavedCardID} />
               {isLink && <SendLinkChannelPicker value={linkChannel} onChange={setLinkChannel} />}
             </div>
           )}
-          {price > 0 && !isLink && (
+          {/* A saved card is charged now, so there is no date to back-date. */}
+          {price > 0 && !isLink && !bySavedCard && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="am-payment-date">Payment date</Label>
               <Input id="am-payment-date" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="h-9 w-[180px]" />
@@ -521,9 +546,10 @@ export default function AssignMembershipForm({ customerID, locationID, onSuccess
                     methods={PLAN_SHORTFALL_METHODS}
                   />
                   <CheckNumberField method={chargeMethod} checkNumber={checkNumber} onChange={setCheckNumber} />
+                  <SavedCardField method={method} locationID={locationID} customerID={customerID} cardToken={savedCardID} onCardChange={setSavedCardID} />
                   {isLink ? (
                     <SendLinkChannelPicker value={linkChannel} onChange={setLinkChannel} />
-                  ) : (
+                  ) : bySavedCard ? null : (
                     <>
                       <Label htmlFor="am-flex-payment-date">Payment date</Label>
                       <Input id="am-flex-payment-date" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="h-9 w-[180px]" />
@@ -536,8 +562,23 @@ export default function AssignMembershipForm({ customerID, locationID, onSuccess
         </div>
       )}
 
+      {autopayAvailable && (
+        <AutopayOption
+          on={autopayOn}
+          onToggle={(next) => {
+            setAutopayOn(next)
+            if (next && !autopayCardID && bySavedCard) setAutopayCardID(savedCardID)
+          }}
+          card={autopayCardID}
+          onCardChange={setAutopayCardID}
+          customerID={customerID}
+          locationID={locationID}
+          covers={renews && hasFuturePayments ? 'Future payments and renewals are' : renews ? 'Renewals are' : 'Future payments are'}
+        />
+      )}
+
       <div className="flex flex-col gap-1.5">
-        <Label>Notes</Label>
+        <Label className="font-semibold">Notes</Label>
         <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" className="h-9" />
       </div>
 
@@ -547,7 +588,7 @@ export default function AssignMembershipForm({ customerID, locationID, onSuccess
         )}
         <div className="flex justify-end gap-2">
           {onCancel && <Button variant="outline" onClick={onCancel} disabled={submitting}>Cancel</Button>}
-          <Button onClick={() => handleSubmit()} disabled={submitting || walletOver || cloverNotConnected || (billingType === 'flexible' && !flexBalanced)} className="bg-brand hover:bg-brand-dark text-brand-foreground">
+          <Button onClick={() => handleSubmit()} disabled={submitting || walletOver || cloverNotConnected || savedCardNotSelected || autopayNotSelected || (billingType === 'flexible' && !flexBalanced)} className="bg-brand hover:bg-brand-dark text-brand-foreground">
             {submitting ? 'Assigning…' : payWithClover ? 'Pay by card' : 'Assign Membership'}
           </Button>
         </div>

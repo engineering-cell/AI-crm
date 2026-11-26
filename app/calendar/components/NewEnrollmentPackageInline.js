@@ -14,6 +14,7 @@ import WalletShortfallField, { walletShortfall } from "@/components/payments/Wal
 import { SendLinkChannelPicker } from "@/components/payments/SendPaymentLinkMenu";
 import TerminalDeviceField, { terminalTipPayload } from "@/components/payments/TerminalDeviceField";
 import SavedCardField from "@/components/payments/SavedCardField";
+import AutopayOption from "@/components/payments/AutopayOption";
 import CheckNumberField from "@/components/payments/CheckNumberField";
 import PaymentMethodPicker from "@/components/payments/PaymentMethodPicker";
 
@@ -229,6 +230,14 @@ export default function NewEnrollmentPackageInline({
   const [walletBalance, setWalletBalance] = useState(null);
   const [deviceID, setDeviceID] = useState("");
   const [savedCardID, setSavedCardID] = useState("");
+  const [autopayOn, setAutopayOn] = useState(false);
+  const [autopayCardID, setAutopayCardID] = useState("");
+  // A card belongs to one customer; never carry it over to the next.
+  useEffect(() => {
+    setSavedCardID("");
+    setAutopayOn(false);
+    setAutopayCardID("");
+  }, [customerID]);
   const [checkNumber, setCheckNumber] = useState("");
   // Either processor being ready means a card payment can be taken; the backend
   // routes to whichever this location uses.
@@ -539,6 +548,14 @@ export default function NewEnrollmentPackageInline({
   const savedCardNotSelected =
     step === 2 && form.billing.collectNow && form.billing.method === "saved_card" && !savedCardID;
 
+  // Autopay needs a schedule. Not offered when the first installment goes out as a
+  // payment link: the nightly job could charge it while the customer is paying.
+  const autopayAvailable =
+    total > 0 &&
+    ((form.billingType === "payment_plan" && !(form.billing.collectNow && isLink)) ||
+      (form.billingType === "flexible" && form.billing.futurePayments.some((c) => Number(c.amount) > 0)));
+  const autopayNotSelected = step === 2 && autopayAvailable && autopayOn && !autopayCardID;
+
   const defaultCollectAmount = useMemo(() => {
     if (form.billingType === "one_time") return total;
     if (form.billingType === "payment_plan") return firstInstallmentAmount;
@@ -631,6 +648,7 @@ export default function NewEnrollmentPackageInline({
         collectDate: effectiveCollectDate || undefined,
         ...(collect && chargeMethod === "terminal" ? { deviceID, ...terminalTipPayload() } : {}),
         ...(collect && form.billing.method === "saved_card" ? { savedCardID } : {}),
+        autopayCardID: autopayAvailable && autopayOn ? autopayCardID : undefined,
         ...(collect && chargeMethod === "cheque" ? { checkNumber } : {}),
       },
     };
@@ -673,7 +691,7 @@ export default function NewEnrollmentPackageInline({
       <div className="flex-1 min-h-0 overflow-y-auto mt-3 pr-1 space-y-3">
         <div className="space-y-3 pb-1" hidden={step !== 1}>
           <div className="space-y-2">
-            <label className="text-[11px] font-medium text-muted-foreground">
+            <label className="text-[12px] font-semibold text-foreground">
               Teacher
             </label>
             <SearchableSelect
@@ -685,7 +703,7 @@ export default function NewEnrollmentPackageInline({
 
             {!serviceOnly && (
               <>
-                <label className="text-[11px] font-medium text-muted-foreground">
+                <label className="text-[12px] font-semibold text-foreground">
                   Label (optional)
                 </label>
                 <input
@@ -697,7 +715,7 @@ export default function NewEnrollmentPackageInline({
                   className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[12px]"
                 />
 
-                <label className="text-[11px] font-medium text-muted-foreground">
+                <label className="text-[12px] font-semibold text-foreground">
                   Package
                 </label>
                 <SearchableSelect
@@ -731,7 +749,7 @@ export default function NewEnrollmentPackageInline({
                 </p>
               </div>
             )}
-            <label className="text-[11px] font-medium text-muted-foreground">
+            <label className="text-[12px] font-semibold text-foreground">
               Purchase date
             </label>
             <input
@@ -742,7 +760,7 @@ export default function NewEnrollmentPackageInline({
               }
               className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[12px]"
             />
-            <label htmlFor="enrollment-notes" className="block text-[11px] font-medium text-muted-foreground">
+            <label htmlFor="enrollment-notes" className="block text-[12px] font-semibold text-foreground">
               Notes (optional)
             </label>
             <textarea
@@ -942,7 +960,7 @@ export default function NewEnrollmentPackageInline({
 
           {/* ── Billing type ── */}
           <div className="space-y-2">
-            <p className="text-[11px] font-medium text-muted-foreground uppercase">
+            <p className="text-[12px] font-semibold text-foreground uppercase">
               Billing Type
             </p>
             <div className="grid grid-cols-3 gap-2">
@@ -1545,6 +1563,21 @@ export default function NewEnrollmentPackageInline({
               )}
             </div>
 
+            {autopayAvailable && (
+              <AutopayOption
+                on={autopayOn}
+                onToggle={(next) => {
+                  setAutopayOn(next);
+                  // Start from the card already picked for today's payment.
+                  if (next && !autopayCardID && form.billing.method === "saved_card") setAutopayCardID(savedCardID);
+                }}
+                card={autopayCardID}
+                onCardChange={setAutopayCardID}
+                customerID={customerID}
+                locationID={locationID}
+                covers={form.billingType === "flexible" ? "Future payments are" : "Installments not collected today are"}
+              />
+            )}
           </div>
         )}
       </div>
@@ -1651,7 +1684,7 @@ export default function NewEnrollmentPackageInline({
             type="button"
             className="h-8 px-3 rounded-lg bg-brand text-brand-foreground text-[11px] font-semibold disabled:opacity-60"
             onClick={() => handleSubmit()}
-            disabled={loading || (serviceOnly ? form.services.length === 0 : !form.packageID) || walletOver || cloverNotConnected || terminalNotSelected || savedCardNotSelected}
+            disabled={loading || (serviceOnly ? form.services.length === 0 : !form.packageID) || walletOver || cloverNotConnected || terminalNotSelected || savedCardNotSelected || autopayNotSelected}
           >
             {loading ? "Creating…" : payWithClover ? "Pay by card" : serviceOnly ? "Create Enrollment & Services" : "Create Enrollment & Package"}
           </button>

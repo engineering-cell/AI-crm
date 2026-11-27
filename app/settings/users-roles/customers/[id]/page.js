@@ -48,6 +48,7 @@ import CustomerMembershipsTab from "@/components/membership/CustomerMembershipsT
 import CustomerWalletTab from "@/components/wallet/CustomerWalletTab";
 import { useTerminalChargeSettled } from "@/lib/hooks/useTerminalChargeSettled";
 import CancelRefundDialog from "@/components/shared/CancelRefundDialog";
+import { defaultRefundDestination } from "@/lib/refund-destination";
 import ConfirmStatusOverrideDialog from "@/components/customers/ConfirmStatusOverrideDialog";
 import CustomerStatusHistory from "@/components/customers/CustomerStatusHistory";
 import CustomerInboxThread from "@/components/customers/CustomerInboxThread";
@@ -201,21 +202,25 @@ const REFUND_DESTINATIONS = [
 
 function IssueRefundDialog({ open, onClose, payment, customerID, onSuccess }) {
   const [amount, setAmount] = useState("");
-  const [destination, setDestination] = useState("wallet");
+  const [destination, setDestination] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
+  useEffect(() => {
+    setDestination(defaultRefundDestination(payment?.method));
+  }, [payment]);
+
   function reset() {
     setAmount("");
-    setDestination("wallet");
+    setDestination(defaultRefundDestination(payment?.method));
     setNotes("");
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     const num = parseFloat(amount);
-    if (isNaN(num) || num <= 0) return;
+    if (isNaN(num) || num <= 0 || !destination) return;
     setSaving(true);
     // The endpoint refunds against a customer's payments, not a paymentID — it was being
     // sent one, so the required fields were missing and every refund failed.
@@ -284,6 +289,9 @@ function IssueRefundDialog({ open, onClose, payment, customerID, onSuccess }) {
               onChange={(e) => setDestination(e.target.value)}
               className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[13px] outline-none focus:border-primary"
             >
+              <option value="" disabled>
+                Choose where the money goes
+              </option>
               {REFUND_DESTINATIONS.map((d) => (
                 <option key={d.value} value={d.value}>
                   {d.label}
@@ -320,7 +328,7 @@ function IssueRefundDialog({ open, onClose, payment, customerID, onSuccess }) {
             <Button
               type="submit"
               size="sm"
-              disabled={saving || !amount}
+              disabled={saving || !amount || !destination}
               className="bg-rose-600 hover:bg-rose-700 text-white"
             >
               {saving ? "Refunding…" : "Issue Refund"}

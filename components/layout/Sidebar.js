@@ -92,8 +92,6 @@ const navItems = [
       { name: 'Stages & Lifecycle', href: '/ai-automation/lead-statuses' },
       { name: 'AI Calls Data', href: '/ai-automation/ai-calling-data' },
       { name: 'Training', href: '/ai-automation/training' },
-      { name: 'RAG Knowledge', href: '/ai-automation/rag' },
-      { name: 'AI Reply Reviews', href: '/ai-automation/ai-reply-reviews' },
     ],
   },
   {

@@ -17,6 +17,7 @@ import { useLeadStages } from '@/lib/lead-stages'
 import { getLeadReasonOptions } from '@/lib/lead-filter-fields'
 import { formatReasonLabel } from '@/lib/dynamic-list-normalize'
 import LeadEngagementHistory from '@/components/leads/LeadEngagementHistory'
+import LeadWorkflowsSection from '@/components/leads/LeadWorkflowsSection'
 import { formatLeadSource } from '@/lib/lead-source'
 
 const CLICK_ID_LABELS = {
@@ -748,6 +749,8 @@ export default function LeadsDialog({
               )}
             </div>
           )}
+
+          {editingLead._id && <LeadWorkflowsSection leadId={editingLead._id} />}
 
           {editingLead._id && (
             <LeadEngagementHistory

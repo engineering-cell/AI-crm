@@ -48,7 +48,6 @@ import CustomerMembershipsTab from "@/components/membership/CustomerMembershipsT
 import CustomerWalletTab from "@/components/wallet/CustomerWalletTab";
 import { useTerminalChargeSettled } from "@/lib/hooks/useTerminalChargeSettled";
 import CancelRefundDialog from "@/components/shared/CancelRefundDialog";
-import { defaultRefundDestination } from "@/lib/refund-destination";
 import ConfirmStatusOverrideDialog from "@/components/customers/ConfirmStatusOverrideDialog";
 import CustomerStatusHistory from "@/components/customers/CustomerStatusHistory";
 import CustomerInboxThread from "@/components/customers/CustomerInboxThread";
@@ -195,9 +194,9 @@ const refIdOf = (ref) => ref?._id ?? ref ?? null;
 // Where the refunded money goes. Wallet keeps it with the studio as store credit, so
 // nothing goes back to the card; Cash or Card returns card-taken money to that card.
 const REFUND_DESTINATIONS = [
-  { value: "wallet", label: "Wallet (store credit)" },
-  { value: "cash", label: "Cash" },
-  { value: "card", label: "Card" },
+  { value: "wallet", label: "Wallet (store credit)", hint: "Added to the customer's wallet to spend on a future purchase. Nothing goes back to their card." },
+  { value: "cash", label: "Cash", hint: "Cash handed back. A Stripe or Clover payment still goes back to the card." },
+  { value: "card", label: "Card", hint: "Goes back to the card the customer paid with." },
 ];
 
 function IssueRefundDialog({ open, onClose, payment, customerID, onSuccess }) {
@@ -207,13 +206,9 @@ function IssueRefundDialog({ open, onClose, payment, customerID, onSuccess }) {
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
-  useEffect(() => {
-    setDestination(defaultRefundDestination(payment?.method));
-  }, [payment]);
-
   function reset() {
     setAmount("");
-    setDestination(defaultRefundDestination(payment?.method));
+    setDestination("");
     setNotes("");
   }
 
@@ -283,27 +278,34 @@ function IssueRefundDialog({ open, onClose, payment, customerID, onSuccess }) {
               />
             </div>
           </FormField>
-          <FormField label="Refund to" required>
-            <select
-              value={destination}
-              onChange={(e) => setDestination(e.target.value)}
-              className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[13px] outline-none focus:border-primary"
-            >
-              <option value="" disabled>
-                Choose where the money goes
-              </option>
-              {REFUND_DESTINATIONS.map((d) => (
-                <option key={d.value} value={d.value}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-            {destination === "wallet" && (
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                Added to the customer's wallet to spend on a future purchase.
-              </p>
-            )}
-          </FormField>
+          <fieldset className="space-y-2">
+            <legend className="mb-1.5 text-[12px] font-medium text-muted-foreground">
+              Refund to<span className="text-destructive ml-0.5">*</span>
+            </legend>
+            {REFUND_DESTINATIONS.map((d) => (
+              <label
+                key={d.value}
+                className={`flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer transition-colors ${
+                  destination === d.value
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:bg-muted/40"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="refund-destination"
+                  value={d.value}
+                  checked={destination === d.value}
+                  onChange={() => setDestination(d.value)}
+                  className="mt-0.5 accent-brand"
+                />
+                <span>
+                  <span className="block text-[13px] font-medium text-foreground">{d.label}</span>
+                  <span className="block text-[11px] text-muted-foreground">{d.hint}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
           <FormField label="Reason (optional)">
             <input
               type="text"

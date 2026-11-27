@@ -251,8 +251,10 @@ export default function Header({
     ? searchParams?.get("view") || "scripts"
     : null;
   const rawMessagingView = searchParams?.get("view");
+  const canOpenMessagingReviewView =
+    !["cloned-review-rag", "ai-reply-reviews"].includes(rawMessagingView) || isSuperAdmin();
   const aiMessagingView = isAIMessaging
-    ? ["prompt", "knowledge-base", "playbook"].includes(rawMessagingView)
+    ? ["prompt", "knowledge-base", "playbook", "cloned-review-rag", "ai-reply-reviews"].includes(rawMessagingView) && canOpenMessagingReviewView
       ? rawMessagingView
       : "prompt"
     : null;
@@ -420,11 +422,15 @@ export default function Header({
               </div>
             ) : isAIMessaging ? (
               <div className="flex h-[44px] items-center">
-                <div className="flex w-max items-center gap-5 rounded-full bg-muted px-4 py-2 sm:gap-8 sm:px-6">
+                <div className="flex w-max items-center gap-3 rounded-full bg-muted px-3 py-2 sm:gap-4 sm:px-4">
                   {[
                     { value: "prompt", label: "Prompt" },
                     { value: "knowledge-base", label: "Knowledge base" },
                     { value: "playbook", label: "Conversation playbook" },
+                    ...(isSuperAdmin() ? [
+                      { value: "cloned-review-rag", label: "Cloned review RAG" },
+                      { value: "ai-reply-reviews", label: "AI Reply Reviews" },
+                    ] : []),
                   ].map(({ value, label }) => {
                     const isActive = aiMessagingView === value;
                     return (

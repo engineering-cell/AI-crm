@@ -194,28 +194,28 @@ const refIdOf = (ref) => ref?._id ?? ref ?? null;
 // Where the refunded money goes. Wallet keeps it with the studio as store credit, so
 // nothing goes back to the card; Cash or Card returns card-taken money to that card.
 const REFUND_DESTINATIONS = [
-  { value: "wallet", label: "Wallet (store credit)" },
-  { value: "cash", label: "Cash" },
-  { value: "card", label: "Card" },
+  { value: "wallet", label: "Wallet (store credit)", hint: "Added to the customer's wallet to spend on a future purchase. Nothing goes back to their card." },
+  { value: "cash", label: "Cash", hint: "Cash handed back. A Stripe or Clover payment still goes back to the card." },
+  { value: "card", label: "Card", hint: "Goes back to the card the customer paid with." },
 ];
 
 function IssueRefundDialog({ open, onClose, payment, customerID, onSuccess }) {
   const [amount, setAmount] = useState("");
-  const [destination, setDestination] = useState("wallet");
+  const [destination, setDestination] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
   function reset() {
     setAmount("");
-    setDestination("wallet");
+    setDestination("");
     setNotes("");
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     const num = parseFloat(amount);
-    if (isNaN(num) || num <= 0) return;
+    if (isNaN(num) || num <= 0 || !destination) return;
     setSaving(true);
     // The endpoint refunds against a customer's payments, not a paymentID — it was being
     // sent one, so the required fields were missing and every refund failed.
@@ -278,24 +278,34 @@ function IssueRefundDialog({ open, onClose, payment, customerID, onSuccess }) {
               />
             </div>
           </FormField>
-          <FormField label="Refund to" required>
-            <select
-              value={destination}
-              onChange={(e) => setDestination(e.target.value)}
-              className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[13px] outline-none focus:border-primary"
-            >
-              {REFUND_DESTINATIONS.map((d) => (
-                <option key={d.value} value={d.value}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-            {destination === "wallet" && (
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                Added to the customer's wallet to spend on a future purchase.
-              </p>
-            )}
-          </FormField>
+          <fieldset className="space-y-2">
+            <legend className="mb-1.5 text-[12px] font-medium text-muted-foreground">
+              Refund to<span className="text-destructive ml-0.5">*</span>
+            </legend>
+            {REFUND_DESTINATIONS.map((d) => (
+              <label
+                key={d.value}
+                className={`flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer transition-colors ${
+                  destination === d.value
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:bg-muted/40"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="refund-destination"
+                  value={d.value}
+                  checked={destination === d.value}
+                  onChange={() => setDestination(d.value)}
+                  className="mt-0.5 accent-brand"
+                />
+                <span>
+                  <span className="block text-[13px] font-medium text-foreground">{d.label}</span>
+                  <span className="block text-[11px] text-muted-foreground">{d.hint}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
           <FormField label="Reason (optional)">
             <input
               type="text"
@@ -320,7 +330,7 @@ function IssueRefundDialog({ open, onClose, payment, customerID, onSuccess }) {
             <Button
               type="submit"
               size="sm"
-              disabled={saving || !amount}
+              disabled={saving || !amount || !destination}
               className="bg-rose-600 hover:bg-rose-700 text-white"
             >
               {saving ? "Refunding…" : "Issue Refund"}

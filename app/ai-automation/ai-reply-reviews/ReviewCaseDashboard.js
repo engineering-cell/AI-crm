@@ -8,7 +8,7 @@ import { reviewCaseListPath } from './reviewCaseQuery'
 
 const CASE_STATUSES = [
   { status: 'pending', label: 'Pending', description: 'Waiting for staff review' },
-  { status: 'passed', label: 'Passed', description: 'Both automated checks passed' },
+  { status: 'passed', label: 'Passed', description: 'Automated review passed' },
   { status: 'approved', label: 'Approved', description: 'Staff approved the correction' },
   { status: 'rejected', label: 'Rejected', description: 'Staff rejected the correction' },
 ]
